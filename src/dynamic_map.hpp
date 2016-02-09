@@ -1,6 +1,6 @@
 #pragma once
 
-#include <map>
+#include <unordered_map>
 #include <array>
 #include <functional>
 
@@ -8,10 +8,9 @@ namespace studd
 {
     template<class Key,
              class T,
-             std::size_t N,
              class Hash = std::hash<Key>,
              class KeyEqual = std::equal_to<Key>,
-             class InternalMap = std::map<Key, std::size_t>,
+             class InternalMap = std::unordered_map<Key, T>,
              class Allocator = std::allocator<std::pair<const Key, T>>>
     class dynamic_map
     {
@@ -36,58 +35,35 @@ namespace studd
             auto it = mapping.find(k);
             if (it == mapping.end())
             {
-                if (num_active == N)
-                {
-                    it = find_by_index(index);
-                    mapping.erase(it);
-                }
-                else
-                {
-                    num_active++;
-                }
-                auto i = index;
-                auto new_it = mapping.emplace(k, i);
-                storage[i] = producer(k);
-                index = (index + 1) % N;
-                return storage[i];
+                num_active++;
+                auto new_it = mapping.insert(it, std::make_pair(k, producer(k)));
+                return mapping[k];
             }
             else
             {
-                return storage[it->second];
+                return it->second;
             }
         }
 
         size_type size() const
         {
-            return N;
+            return num_active;
+        }
+
+        bool empty() const
+        {
+            return num_active == 0;
         }
 
         void clear()
         {
             num_active = 0;
-            index = 0;
             mapping.clear();
         }
 
     private:
         InternalMap mapping;
-        std::array<T, N> storage;
         std::size_t num_active = 0;
-        std::size_t index = 0;
         std::function<T(const Key&)> producer;
-
-        typename InternalMap::iterator find_by_index(std::size_t i)
-        {
-            for (typename InternalMap::iterator it = mapping.begin();
-                 it != mapping.end();
-                 ++it)
-            {
-                if (it->second == i)
-                {
-                    return it;
-                }
-            }
-            return mapping.end();
-        }
     };
 }
