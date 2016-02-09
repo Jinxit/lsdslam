@@ -30,14 +30,14 @@ namespace studd
         using pointer = typename std::allocator_traits<Allocator>::pointer;
         using const_pointer = typename std::allocator_traits<Allocator>::const_pointer;
 
-        T& operator[](const Key& k)
+        T& operator[](Key&& k)
         {
             auto it = mapping.find(k);
             if (it == mapping.end())
             {
                 num_active++;
-                auto new_it = mapping.insert(it, std::make_pair(k, producer(k)));
-                return mapping[k];
+                auto new_it = mapping.emplace_hint(it, std::forward<Key>(k), producer(k));
+                return new_it->second;
             }
             else
             {
