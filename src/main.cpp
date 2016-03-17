@@ -606,16 +606,16 @@ std::vector<pixel> warp(std::vector<pixel> sparse_inverse_depth, const transform
     {
         // pi_1^-1
         cv::Vec3f p2;
-        p2[0] = 1.0 / p.inverse_depth * (p.x + principal_point.x) / focal_length.x;
-        p2[1] = 1.0 / p.inverse_depth * (p.y + principal_point.y) / focal_length.y;
+        p2[0] = (p.x - principal_point.x) / (focal_length.x * p.inverse_depth);
+        p2[1] = (p.y - principal_point.y) / (focal_length.y * p.inverse_depth);
         p2[2] = 1.0 / p.inverse_depth;
 
         // T
         p2 = cv::Mat(ksi.rotation * cv::Mat(p2) + ksi.translation);
 
         // pi_2
-        p.x = p2[0] * focal_length.x / p2[2] - principal_point.x;
-        p.y = p2[1] * focal_length.y / p2[2] - principal_point.y;
+        p.x = p2[0] * focal_length.x / p2[2] + principal_point.x;
+        p.y = p2[1] * focal_length.y / p2[2] + principal_point.y;
         p.inverse_depth = 1.0 / p2[2];
     }
 
