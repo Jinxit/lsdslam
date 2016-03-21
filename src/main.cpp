@@ -116,9 +116,9 @@ std::pair<Eigen::Affine3f, Eigen::Matrix3f> keypoint_tracking(const Image& new_i
     Eigen::Vector3f translation_eigen;
     cv::cv2eigen(fundamental, fundamental_eigen);
     cv::cv2eigen(rotation, rotation_eigen);
-    pose.matrix().topLeftCorner(3, 3) = rotation_eigen;
+    pose.matrix().topLeftCorner<3, 3>() = rotation_eigen;
     cv::cv2eigen(translation, translation_eigen);
-    pose.matrix().topRightCorner(3, 1) = translation_eigen;
+    pose.matrix().topRightCorner<3, 1>() = translation_eigen;
     return {pose, fundamental_eigen};
 }
 
@@ -161,7 +161,7 @@ std::vector<epiline> generate_epilines(const Image& new_image,
 
 Eigen::Vector2f get_epipole(const Eigen::Affine3f& transform)
 {
-    return (K * transform.translation()).topLeftCorner(1, 2);
+    return (K * transform.translation()).topLeftCorner<2, 1>();
 }
 
 studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline)
@@ -232,7 +232,7 @@ studd::two<Image> disparity_epiline_ssd(
     cv::Mat disps = cv::Mat::zeros(height, width, CV_8UC3);
 
     auto safe = [&](const Eigen::Vector2f& p) {
-        return p.x() > 0 && p.y() > 0 && p.x() < width && p.y() < height;
+        return p.x() >= 0 && p.y() >= 0 && p.x() < width && p.y() < height;
     };
 
     auto ssd = [&](const std::array<float, num_epiline_samples> target,
@@ -242,9 +242,9 @@ studd::two<Image> disparity_epiline_ssd(
         {
             if (!safe(p))
                 total += 1000;
+            else
+                total += studd::square(target[i] - new_image(p.y(), p.x()));
 
-            float diff = target[i] - new_image(p.y(), p.x());
-            total += diff * diff;
             p += dp;
         }
 
@@ -304,8 +304,8 @@ studd::two<Image> disparity_epiline_ssd(
             continue;
         }
 
-        disparity[0](epi.point.y(), epi.point.x()) = epi.point.x() - min_p.x();
-        disparity[1](epi.point.y(), epi.point.x()) = epi.point.y() - min_p.y();
+        disparity[0](epi.point.y(), epi.point.x()) = min_p.x() - epi.point.x();
+        disparity[1](epi.point.y(), epi.point.x()) = min_p.y() - epi.point.y();
 
         auto disp_n = (epi.point.cast<float>() - min_p).norm();
         if (disp_n > max_disp)
@@ -554,18 +554,21 @@ struct se3
 {
     se3() : omega(Eigen::Vector3f::Zero()), nu(Eigen::Vector3f::Zero()) { }
     se3(const Eigen::Vector3f& omega, const Eigen::Vector3f& nu) : omega(omega), nu(nu) { }
+    se3(const Matrix<6, 1>& m) : omega(m.topLeftCorner<3, 1>()), nu(m.topRightCorner<3, 1>()) { }
+    se3(float omega_x, float omega_y, float omega_z, float nu_x, float nu_y, float nu_z)
+        : omega({omega_x, omega_y, omega_z}), nu({nu_x, nu_y, nu_z}) { }
     se3(const Eigen::Affine3f& noncanonical)
     {
         auto logged = noncanonical.matrix().log();
-        omega = unskewed(logged.topLeftCorner(3, 3));
-        nu = logged.topRightCorner(3, 1);
+        omega = unskewed(logged.topLeftCorner<3, 3>());
+        nu = logged.topRightCorner<3, 1>();
     }
 
     Eigen::Affine3f exp() const
     {
         auto skew = skewed(omega);
         auto skew2 = studd::square(skew);
-        auto w_norm2 = omega.squaredNorm();
+        auto w_norm2 = std::max(0.000001f, omega.squaredNorm()); // because division by zero, yo
         auto w_norm = std::sqrt(w_norm2);
 
         Eigen::Matrix3f e_omega = Eigen::Matrix3f::Identity()
@@ -586,6 +589,11 @@ struct se3
     friend se3 operator^(const se3& ksi, const se3& ksi_delta)
     {
         return se3(ksi.exp() * ksi_delta.exp());
+    }
+
+    friend std::ostream& operator<< (std::ostream& stream, const se3& self) {
+        stream << self.omega << std::endl << self.nu;
+        return stream;
     }
 
     Eigen::Vector3f omega;
@@ -665,6 +673,7 @@ Eigen::Affine3f photometric_tracking(const std::vector<pixel>& sparse_inverse_de
         if (i != 0)
         {
             new_ksi = ksi ^ delta_ksi;
+            std::cout << "new ksi: " << std::endl << new_ksi << std::endl;
         }
         std::cout << 2 << std::endl;
 
@@ -692,15 +701,15 @@ Eigen::Affine3f photometric_tracking(const std::vector<pixel>& sparse_inverse_de
                                                              new_image, ref_image, weighting);
         std::cout << 4 << std::endl;
 
-        Eigen::VectorXf residuals_t_weights = residuals.transpose() * weights;
-        std::cout << 4.1 << std::endl;
+        float error = ((residuals.transpose() * weights).dot(residuals)
+                    / sparse_inverse_depth.size());
 
-        float error = (residuals_t_weights * residuals / sparse_inverse_depth.size())(0, 0);
-
+        std::cout << "sparse_inverse_depth size = " << std::endl << sparse_inverse_depth.size() << std::endl;
         // consider switching to (last_error - error) / last_error < eps, according to wiki
-        if (error > last_error)
+        if (i > 1 && error > last_error)
         {
             std::cout << "BOOM" << std::endl;
+            std::cout << "errorb: " << error << std::endl;
             //delta_ksi = transform();
             //new_ksi = transform(ksi);
             //continue;
@@ -719,23 +728,24 @@ Eigen::Affine3f photometric_tracking(const std::vector<pixel>& sparse_inverse_de
 
         Eigen::MatrixXf J_t_weights = J.transpose() * weights;
         ksi = new_ksi;
-        Matrix<4, 4> ksi_matrix = ((J_t_weights * J).inverse() * J_t_weights * residuals)
-                                  .topLeftCorner(4, 4);
-        delta_ksi = se3(Eigen::Affine3f(ksi_matrix));
+        delta_ksi = se3((J_t_weights * J).inverse() * J_t_weights * residuals);
 
         std::cout << 6 << std::endl;
         std::cout << "ksi: " << std::endl << ksi.omega << std::endl
                   << ksi.nu << std::endl;
         std::cout << "delta_ksi: " << std::endl << delta_ksi.omega << std::endl
                   << delta_ksi.nu << std::endl;
+        std::cout << "new_ksi: " << std::endl << new_ksi.omega << std::endl
+                  << new_ksi.nu << std::endl;
         std::cout << "error: " << error << std::endl;
-        std::cout << "first: " << (J_t_weights * J).inverse() << std::endl;
         if (std::abs(error - last_error) < epsilon)
             break;
 
         last_error = error;
     }
 
+    std::cout << "returning " << std::endl << ksi << std::endl;
+    std::cout << "exped " << std::endl << ksi.exp().matrix() << std::endl;
     return ksi.exp();
 }
 
@@ -757,6 +767,8 @@ int main(int argc, const char* argv[])
     auto epipole = get_epipole(pose);
     for (size_t i = frame_skip + 1; i < 50000; i += frame_skip)
     {
+        std::cout << "pose: " << std::endl << pose.matrix() << std::endl;
+        std::cout << "fundamental: " << std::endl << fundamental << std::endl;
         std::cout << "m" << 0 << std::endl;
         auto epilines = generate_epilines(images[i], images[i - frame_skip], fundamental);
         std::cout << "m" << 0.1 << std::endl;
