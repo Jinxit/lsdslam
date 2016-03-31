@@ -3,6 +3,9 @@
 #include <utility>
 #include <cmath>
 #include <random>
+#include <chrono>
+#include <iomanip>
+#include <fstream>
 
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
@@ -20,15 +23,82 @@
 #include "two.hpp"
 #include "square.hpp"
 
-const Eigen::Vector2f focal_length = Eigen::Vector2f{254.32, 375.93};
-const Eigen::Vector2f principal_point = Eigen::Vector2f{267.38, 231.59};
 constexpr int width = 640;
 constexpr int height = 480;
+const Eigen::Vector2f focal_length = Eigen::Vector2f{254.32, 375.93};
+const Eigen::Vector2f principal_point = Eigen::Vector2f{267.38, 231.59};
 Eigen::Matrix3f K = Eigen::Matrix3f::Zero();
 
 template<int Height, int Width>
 using Matrix = Eigen::Matrix<float, Height, Width>;
 using Image = Eigen::MatrixXf;
+
+void show(const std::string& title, const Image& image, bool normalize = false,
+          float multiplier = 1.0f)
+{
+    cv::Mat cv_image;
+    cv::eigen2cv(image, cv_image);
+    if (normalize)
+        cv::normalize(cv_image, cv_image, 1, 0, cv::NORM_INF);
+    //std::cout << "show " << image(0, 0) << " " << cv_image.at<float>(0, 0) << std::endl;
+    cv::imshow(title, cv_image * multiplier);
+}
+
+void show(const std::string& title, const studd::two<Image>& image, bool normalize = false,
+          float multiplier = 1.0f)
+{
+    cv::Mat g;
+    cv::Mat b;
+    cv::Mat r = cv::Mat::zeros(height, width, CV_32F);
+    cv::eigen2cv(image[0], g);
+    cv::eigen2cv(image[1], b);
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            if (b.at<float>(y, x) < 0)
+            {
+                b.at<float>(y, x) = 0;
+                r.at<float>(y, x) = 1;
+            }
+        }
+    }
+    if (normalize)
+    {
+        cv::normalize(g, g, 1, 0, cv::NORM_INF);
+        cv::normalize(b, b, 1, 0, cv::NORM_INF);
+    }
+    cv::Mat cv_image;
+    cv::merge(std::vector<cv::Mat>{b, g, r}, cv_image);
+    //std::cout << "show " << image(0, 0) << " " << cv_image.at<float>(0, 0) << std::endl;
+    cv::imshow(title, cv_image * multiplier);
+}
+
+void show_rainbow(const std::string& title, const studd::two<Image>& image)
+{
+    cv::Mat h = cv::Mat::zeros(height, width, CV_32F);;
+    cv::Mat s = cv::Mat::ones(height, width, CV_32F);
+    cv::Mat v = cv::Mat::ones(height, width, CV_32F);
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            if (image[1](y, x) < 0 || x < 5 || x > width - 5 || y < 5 || y > height - 5)
+            {
+                v.at<float>(y, x) = 0;
+            }
+            else if (image[0](y, x) != 0)
+            {
+                h.at<float>(y, x) = 1.0 / image[0](y, x);
+            }
+        }
+    }
+    cv::normalize(h, h, 180, 0, cv::NORM_INF);
+    cv::Mat cv_image;
+    cv::merge(std::vector<cv::Mat>{h, s, v}, cv_image);
+    cv::cvtColor(cv_image, cv_image, CV_HSV2RGB);
+    cv::imshow(title, cv_image);
+}
 
 Image load_image(const unsigned int& id)
 {
@@ -161,7 +231,8 @@ std::vector<epiline> generate_epilines(const Image& new_image,
 
 Eigen::Vector2f get_epipole(const Eigen::Affine3f& transform)
 {
-    return (K * transform.translation()).topLeftCorner<2, 1>();
+    Eigen::Vector3f homogenous = K * transform.translation();
+    return homogenous.topLeftCorner<2, 1>() / homogenous[2];
 }
 
 studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline)
@@ -265,8 +336,7 @@ studd::two<Image> disparity_epiline_ssd(
 
         std::array<float, num_epiline_samples> target{0};
         auto p = p0;
-        Eigen::Vector2f dp = p1 - p0;
-        dp = dp.normalized() * epiline_sample_distance;
+        Eigen::Vector2f dp = (p1 - p0).normalized() * epiline_sample_distance;
 
         // set up target values;
         for (int i = 0; i < int(num_epiline_samples); i++)
@@ -341,6 +411,40 @@ struct gaussian
     gaussian(float mean, float variance)
         : mean(mean), variance(variance) { };
 
+    friend gaussian operator^(const gaussian& lhs, const gaussian& rhs)
+    {
+        if (rhs.variance < 0)
+        {
+            return lhs;
+        }
+        if (lhs.variance < 0)
+        {
+            return rhs;
+        }
+
+        if (std::abs(lhs.mean - rhs.mean) > lhs.variance * 2)
+        {
+            if (lhs.mean > rhs.mean)
+            {
+                return lhs;
+            }
+            else
+            {
+                return rhs;
+            }
+        }
+
+        auto mean = (lhs.variance * rhs.mean + rhs.variance * lhs.mean)
+                    / (lhs.variance + rhs.variance);
+        auto variance = (lhs.variance * rhs.variance) / (lhs.variance + rhs.variance);
+        return gaussian(mean, variance);
+    }
+
+    friend std::ostream& operator<< (std::ostream& stream, const gaussian& self) {
+        stream << self.mean << " " << self.variance;
+        return stream;
+    }
+
     float mean;
     float variance;
 };
@@ -370,7 +474,7 @@ gaussian photometric_disparity(const Image& new_image,
                                const Eigen::Vector2f& disparity_0,
                                const Eigen::Vector2f& epipole)
 {
-    constexpr float sigma_i = 1.0f;
+    constexpr float sigma_i = 0.01f;
 
     Eigen::Vector2f g(gradient[0](y, x), gradient[1](y, x));
     auto g_p = g.x() * epi.line[0] + g.y() * epi.line[1];
@@ -391,9 +495,9 @@ studd::two<Image> regularize_depth(const Image& inverse_depth, const Image& vari
     Image output_inv_depth = Image::Zero(height, width);
     Image output_variance = Image::Zero(height, width);
 
-    for (int y = 1; y < int(height - 1); y++)
+    for (int y = 1; y < height - 1; y++)
     {
-        for (int x = 1; x < int(width - 1); x++)
+        for (int x = 1; x < width - 1; x++)
         {
             int num_added = 0;
 
@@ -444,11 +548,12 @@ struct pixel
 
 // Odometry from RGB-D Cameras for Autonomous Quadrocopters (eq 4.22 onwards)
 Matrix<1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
-                                 float x, float y, float inverse_depth)
+                                 float x, float y, float inverse_depth,
+                                 int pyr)
 {
     Matrix<1, 2> J_I = Matrix<1, 2>::Zero();
-    J_I(0, 0) = gradient[0](y, x);
-    J_I(0, 1) = gradient[1](y, x);
+    J_I(0, 0) = gradient[0](y / pyr, x / pyr);
+    J_I(0, 1) = gradient[1](y / pyr, x / pyr);
 
     Matrix<2, 3> J_pi = Matrix<2, 3>::Zero();
     J_pi(0, 0) =  focal_length.x() * inverse_depth;
@@ -592,7 +697,12 @@ struct se3
     }
 
     friend std::ostream& operator<< (std::ostream& stream, const se3& self) {
-        stream << self.omega << std::endl << self.nu;
+        stream << self.omega[0] << " "
+               << self.omega[1] << " "
+               << self.omega[2] << " "
+               << self.nu[0] << " "
+               << self.nu[1] << " "
+               << self.nu[2];
         return stream;
     }
 
@@ -612,141 +722,434 @@ Eigen::Matrix3f fundamental_from_pose(const Eigen::Affine3f& pose)
 // https://forum.kde.org/viewtopic.php?f=74&t=96407
 // fix to match https://www.tensorflow.org/versions/r0.7/api_docs/python/nn.html#conv2d
 // with multiple filters (variadic input, tuple output)
-template<class Derived, class Derived2>
-Derived conv2d(const Eigen::MatrixBase<Derived>& image, const Eigen::MatrixBase<Derived2>& kernel)
+template<class ImageMatrix, class KernelMatrix>
+ImageMatrix conv2d(const Eigen::MatrixBase<ImageMatrix>& image, const Eigen::Vector2i& stride,
+                   const Eigen::MatrixBase<KernelMatrix>& kernel)
 {
-    Derived output = Derived::Zero(image.rows(), image.cols());
+    ImageMatrix output = ImageMatrix::Zero(image.rows(), image.cols());
+    int half_rows = kernel.rows() / 2;
+    int half_cols = kernel.cols() / 2;
 
-    typedef typename Derived::Scalar Scalar;
-
-    Scalar normalization = kernel.sum();
-    if ( normalization < 1e-6 )
+    for (int row = 0; row < image.rows(); row += stride[1])
     {
-        normalization = 1;
-    }
-    for (int row = kernel.rows(); row < image.rows() - kernel.rows(); row++)
-    {
-        for (int col = kernel.cols(); col < image.cols() - kernel.cols(); col++)
+        for (int col = 0; col < image.cols(); col += stride[0])
         {
-            auto block = static_cast<Derived2>(image.block(row,col,kernel.rows(),kernel.cols()));
-            output.coeffRef(row,col) = block.cwiseProduct(kernel).sum();
+            int a, b, c, d, y, x;
+
+            y = std::max(0, row - half_rows);
+            x = std::max(0, col - half_cols);
+            a = std::max(0, std::min(half_rows, half_rows - row));
+            b = std::max(0, std::min(half_cols, half_cols - col));
+            c = std::min(kernel.rows() - a, image.rows() - row + 1);
+            d = std::min(kernel.cols() - b, image.cols() - col + 1);
+
+            Eigen::MatrixXf block = image.block(y, x, c, d);
+            Eigen::MatrixXf kern = kernel.block(a, b, c, d);
+            output(row, col) = block.cwiseProduct(kern).sum();
         }
     }
 
-    return output / normalization;
+    return output;
 }
 
 
 studd::two<Image> sobel(const Image& image)
 {
     static Eigen::Matrix3f kernel_x;
-    kernel_x << 1, 0, -1,
-                2, 0, -2,
-                1, 0, -1;
+    kernel_x << -1, 0, 1,
+                -2, 0, 2,
+                -1, 0, 1;
 
     static Eigen::Matrix3f kernel_y;
-    kernel_y << 1,  2,  1,
-                0,  0,  0,
-               -1, -2, -1;
+    kernel_y << -1,  -2,  -1,
+                 0,   0,   0,
+                 1,   2,   1;
 
-    return studd::make_two(conv2d(image, kernel_x), conv2d(image, kernel_y));
+    return studd::make_two(conv2d(image, Eigen::Vector2i::Ones(), kernel_x),
+                           conv2d(image, Eigen::Vector2i::Ones(), kernel_y));
 }
 
-Eigen::Affine3f photometric_tracking(const std::vector<pixel>& sparse_inverse_depth,
-                                     const Image& new_image,
-                                     const Image& ref_image,
-                                     const std::function<float(float)>& weighting)
+void plot_errors(const se3& id,
+                 const std::vector<pixel>& sparse_inverse_depth,
+                 const Image& new_image,
+                 const Image& ref_image,
+                 const std::function<float(float)>& weighting)
 {
-    // TODO: pyramids (manual skips)
-
-    constexpr size_t max_iterations = 5;
-    constexpr float epsilon = 1e-5;
-
-    std::cout << 1 << std::endl;
-
-    se3 ksi;
-    se3 delta_ksi;
-    float last_error = std::numeric_limits<float>::infinity();
-    for (size_t i = 0; i < max_iterations; i++)
-    {
-        se3 new_ksi;
-        if (i != 0)
-        {
-            new_ksi = ksi ^ delta_ksi;
-            std::cout << "new ksi: " << std::endl << new_ksi << std::endl;
-        }
-        std::cout << 2 << std::endl;
-
-        auto warped = warp(sparse_inverse_depth, new_ksi.exp());
-
-        // TODO: this is dumb as fuck, how can we do gradients better?
+    static int file_counter = 0;
+    auto calc_error = [&](const se3 ksi, bool save = false) {
+        auto warped = warp(sparse_inverse_depth, ksi.exp());
+        int num_hits = 1;
         Image warped_image = Image::Zero(height, width);
+        Image warped_image_inv_depth = Image::Zero(height, width);
         for (size_t i = 0; i < warped.size(); i++)
         {
             int x = warped[i].x;
             int y = warped[i].y;
             if (x >= 0 && x < width && y >= 0 && y < height)
             {
-                warped_image(sparse_inverse_depth[i].y, sparse_inverse_depth[i].x)
-                    = new_image(y, x);
+                int sx = sparse_inverse_depth[i].x;
+                int sy = sparse_inverse_depth[i].y;
+
+                if (warped_image_inv_depth(y, x) < warped[i].inverse_depth)
+                {
+                    warped_image_inv_depth(y, x) = warped[i].inverse_depth;
+                    warped_image(y, x) = ref_image(sy, sx);
+                }
             }
         }
-        std::cout << 3 << std::endl;
 
+        if (save)
+        {
+            cv::Mat cv_image;
+            cv::eigen2cv(warped_image, cv_image);
+            std::stringstream uh;
+            uh << "warped/" << std::setfill('0') << std::setw(5) << file_counter << "_" << ksi << ".jpg";
+            //cv_image.convertTo(cv_image, CV_32FC3);
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    //cv_image.at<cv::Vec3f>(y, x)[2] = new_image(y, x);
+                    if (cv_image.at<float>(y, x) == 0)
+                        cv_image.at<float>(y, x) = std::abs(cv_image.at<float>(y, x) - new_image(y, x));
+                }
+            }
+            cv::imwrite(uh.str(), cv_image * 255);
+            file_counter++;
+        }
         studd::two<Image> gradient = sobel(warped_image);
-
         Eigen::VectorXf residuals;
         Eigen::DiagonalMatrix<float, Eigen::Dynamic> weights;
         std::tie(residuals, weights) = residuals_and_weights(sparse_inverse_depth, warped,
                                                              new_image, ref_image, weighting);
-        std::cout << 4 << std::endl;
-
         float error = ((residuals.transpose() * weights).dot(residuals)
                     / sparse_inverse_depth.size());
+        float missing_error = error * (float(height * width) / num_hits);
+        return error;// + " " + std::to_string(missing_error) + " " + std::to_string(num_hits);
+    };
 
-        std::cout << "sparse_inverse_depth size = " << std::endl << sparse_inverse_depth.size() << std::endl;
-        // consider switching to (last_error - error) / last_error < eps, according to wiki
-        if (i > 1 && error > last_error)
+    auto lerp = [](float v0, float v1, float t) {
+        return (1 - t) * v0 + t * v1;
+    };
+        for (float t = 0.0f; t <= 1.0f; t += 0.005f)
         {
-            std::cout << "BOOM" << std::endl;
-            std::cout << "errorb: " << error << std::endl;
-            //delta_ksi = transform();
-            //new_ksi = transform(ksi);
-            //continue;
-            break;
-            //exit(1);
+            calc_error(se3(lerp(0, id.omega[0], t),
+                           lerp(0, id.omega[1], t),
+                           lerp(0, id.omega[2], t),
+                           lerp(0, id.nu[0], t),
+                           lerp(0, id.nu[1], t),
+                           lerp(0, id.nu[2], t)), true);
         }
-        std::cout << 4.5 << std::endl;
+    return;
 
-        Eigen::MatrixXf J = Eigen::MatrixXf(warped.size(), 6);
-        for (size_t i = 0; i < sparse_inverse_depth.size(); i++)
-        {
-            auto& p = sparse_inverse_depth[i];
-            J.row(i) = image_pose_jacobian(gradient, p.x, p.y, p.inverse_depth);
-        }
-        std::cout << 5 << std::endl;
-
-        Eigen::MatrixXf J_t_weights = J.transpose() * weights;
-        ksi = new_ksi;
-        delta_ksi = se3((J_t_weights * J).inverse() * J_t_weights * residuals);
-
-        std::cout << 6 << std::endl;
-        std::cout << "ksi: " << std::endl << ksi.omega << std::endl
-                  << ksi.nu << std::endl;
-        std::cout << "delta_ksi: " << std::endl << delta_ksi.omega << std::endl
-                  << delta_ksi.nu << std::endl;
-        std::cout << "new_ksi: " << std::endl << new_ksi.omega << std::endl
-                  << new_ksi.nu << std::endl;
-        std::cout << "error: " << error << std::endl;
-        if (std::abs(error - last_error) < epsilon)
-            break;
-
-        last_error = error;
+    /*for (float val = -0.01f; val < 0.01f; val += 0.0005f)
+    {
+        calc_error(id ^ se3(0, 0, 0, val, 0, 0), true);
     }
+    for (float val = -0.01f; val < 0.01f; val += 0.0005f)
+    {
+        calc_error(id ^ se3(0, 0, 0, 0, val, 0), true);
+    }
+    for (float val = -0.01f; val < 0.01f; val += 0.0005f)
+    {
+        calc_error(id ^ se3(0, 0, 0, 0, 0, val), true);
+    }
+    for (float val = -0.15f; val < 0.15f; val += 0.005f)
+    {
+        calc_error(id ^ se3(val, 0, 0, 0, 0, 0), true);
+    }
+    for (float val = -0.15f; val < 0.15f; val += 0.005f)
+    {
+        calc_error(id ^ se3(0, val, 0, 0, 0, 0), true);
+    }
+    for (float val = -0.15f; val < 0.15f; val += 0.005f)
+    {
+        calc_error(id ^ se3(0, 0, val, 0, 0, 0), true);
+    }*/
+    //exit(0);
+
+    auto start = std::chrono::steady_clock::now();
+    //std::cout << "errors" << std::endl;
+    int count = 0;
+    static std::ofstream f("errors.txt");
+    static std::ofstream g("minima.txt");
+    static std::ofstream h("starts.txt");
+    static int val_count = 0;
+
+    se3 min_tf = id;
+    float min_error = calc_error(id);
+    se3 tf;
+    float error;
+    bool found_smaller = false;
+    for (float val = -0.4f; val < 0.4f; val += 0.04f)
+    {
+        std::cout << "warping " << val << std::endl;
+        if (std::abs(val) < 0.0001)
+        {
+            g << val_count << std::endl;
+        }
+
+        tf = id ^ se3(0, 0, 0, val * 2, 0, 0);
+        error = calc_error(tf);
+        if (error < min_error)
+        {
+            found_smaller = true;
+            min_error = error;
+            min_tf = tf;
+        }
+        f << error << " ";
+        if (std::abs(tf.nu[0]) < 1e-2)
+            h << 0 << " " << val_count << std::endl;
+
+        tf = id ^ se3(0, 0, 0, 0, val * 2, 0);
+        error = calc_error(tf);
+        if (error < min_error)
+        {
+            found_smaller = true;
+            min_error = error;
+            min_tf = tf;
+        }
+        f << error << " ";
+        if (std::abs(tf.nu[1]) < 1e-2)
+            h << 1 << " " << val_count << std::endl;
+
+        tf = id ^ se3(0, 0, 0, 0, 0, val * 2);
+        error = calc_error(tf);
+        if (error < min_error)
+        {
+            found_smaller = true;
+            min_error = error;
+            min_tf = tf;
+        }
+        f << error << " ";
+        if (std::abs(tf.nu[2]) < 1e-2)
+            h << 2 << " " << val_count << std::endl;
+
+        tf = id ^ se3(val, 0, 0, 0, 0, 0);
+        error = calc_error(tf);
+        if (error < min_error)
+        {
+            found_smaller = true;
+            min_error = error;
+            min_tf = tf;
+        }
+        f << error << " ";
+        if (std::abs(tf.omega[0]) < 1e-2)
+            h << 3 << " " << val_count << std::endl;
+
+        tf = id ^ se3(0, val, 0, 0, 0, 0);
+        error = calc_error(tf);
+        if (error < min_error)
+        {
+            found_smaller = true;
+            min_error = error;
+            min_tf = tf;
+        }
+        f << error << " ";
+        if (std::abs(tf.omega[1]) < 1e-2)
+            h << 4 << " " << val_count << std::endl;
+
+        tf = id ^ se3(0, 0, val, 0, 0, 0);
+        error = calc_error(tf);
+        if (error < min_error)
+        {
+            found_smaller = true;
+            min_error = error;
+            min_tf = tf;
+        }
+        f << error << " ";
+        if (std::abs(tf.omega[2]) < 1e-2)
+            h << 5 << " " << val_count << std::endl;
+
+        f << std::endl;
+        count += 6;
+        val_count++;
+    }
+    if (!found_smaller)
+    {
+        std::cout << "finished search, saving images" << std::endl;
+        std::cout << "ksi: " << min_tf << std::endl;
+        for (float t = 0.0f; t <= 1.0f; t += 0.005f)
+        {
+            calc_error(se3(lerp(0, id.omega[0], t),
+                           lerp(0, id.omega[1], t),
+                           lerp(0, id.omega[2], t),
+                           lerp(0, id.nu[0], t),
+                           lerp(0, id.nu[1], t),
+                           lerp(0, id.nu[2], t)), true);
+        }
+    }
+    else
+    {
+        std::cout << "found smaller! " << min_error << std::endl;
+        return plot_errors(min_tf, sparse_inverse_depth, new_image, ref_image, weighting);
+    }
+    auto end = std::chrono::steady_clock::now();
+    auto diff = end - start;
+    //std::cout << std::chrono::duration<double, std::milli>(diff).count() << " ms" << std::endl;
+    //std::cout << "for " << count << " warps" << std::endl;
+}
+
+Eigen::Affine3f photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth,
+                                     const Image& new_image,
+                                     const Image& ref_image,
+                                     const std::function<float(float)>& weighting)
+{
+    constexpr int max_pyramid = 32;
+    constexpr size_t max_iterations = 10;
+    constexpr float epsilon = 1e-9;
+
+    std::cout << 1 << std::endl;
+
+    se3 ksi;
+    se3 delta_ksi;
+    float last_error = std::numeric_limits<float>::infinity();
+
+    int pi = -1;
+    for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
+    {
+        pi++;
+        std::cout << std::endl << "RESOLUTION " << (width / pyr) << " x " << (height / pyr) << std::endl;
+        if (sparse_inverse_depth[pi].size() == 0)
+            continue;
+
+        for (size_t i = 0; i < max_iterations; i++)
+        {
+            se3 new_ksi;
+            if (i != 0)
+            {
+                if (delta_ksi.omega[0] != delta_ksi.omega[0])
+                {
+                    std::cerr << "erroring" << std::endl;
+                    std::cerr << sparse_inverse_depth[pi].size() << std::endl;
+                    plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, weighting);
+                    exit(1);
+                }
+                new_ksi = ksi ^ delta_ksi;
+                std::cout << "new ksi: " << std::endl << new_ksi << std::endl;
+            }
+            std::cout << 2 << std::endl;
+
+            auto warped = warp(sparse_inverse_depth[pi], new_ksi.exp());
+            std::cout << 2.5 << std::endl;
+
+            // TODO: this is dumb as fuck, how can we do gradients better?
+            Image warped_image = Image::Zero(height / pyr, width / pyr);
+            Image warped_image_inv_depth = Image::Zero(height / pyr, width / pyr);
+            for (size_t i = 0; i < warped.size(); i++)
+            {
+                int x = warped[i].x / pyr;
+                int y = warped[i].y / pyr;
+                if (x >= 0 && x < width / pyr && y >= 0 && y < height / pyr)
+                {
+                    int sx = sparse_inverse_depth[pi][i].x;
+                    int sy = sparse_inverse_depth[pi][i].y;
+
+                    if (warped_image_inv_depth(y, x) < warped[i].inverse_depth)
+                    {
+                        warped_image_inv_depth(y, x) = warped[i].inverse_depth;
+                        warped_image(y, x) = ref_image(sy, sx);
+                    }
+                }
+            }
+            std::cout << 3 << std::endl;
+
+            Image ref_resized = Image::Zero(height / pyr, width / pyr);
+            for (int y = 0; y < height; y += pyr)
+            {
+                for (int x = 0; x < width; x += pyr)
+                {
+                    ref_resized(y / pyr, x / pyr) = ref_image(y, x);
+                }
+            }
+            studd::two<Image> gradient = sobel(warped_image);
+            //show("warped", warped_image);
+            //show("gradient x", gradient[0]);
+            //show("gradient y", gradient[1]);
+            //cv::waitKey(0);
+
+            Eigen::VectorXf residuals;
+            Eigen::DiagonalMatrix<float, Eigen::Dynamic> weights;
+            std::tie(residuals, weights) = residuals_and_weights(sparse_inverse_depth[pi], warped,
+                                                                 new_image, ref_image, weighting);
+            std::cout << 4 << std::endl;
+
+            float error = ((weights * residuals).dot(residuals)
+                        / sparse_inverse_depth[pi].size());
+
+            std::cout << "sparse_inverse_depth size = " << std::endl << sparse_inverse_depth[pi].size() << std::endl;
+            // consider switching to (last_error - error) / last_error < eps, according to wiki
+            //if (error > last_error)
+            if (error - last_error > 1e-2)
+            {
+                std::cout << "BOOM" << std::endl;
+                std::cout << "errorb: " << error << std::endl;
+                std::cout << "errord: " << ((last_error - error) / last_error) << std::endl;
+                //delta_ksi = transform();
+                //new_ksi = transform(ksi);
+                //continue;
+                delta_ksi = se3();
+                break;
+                //exit(1);
+            }
+            std::cout << 4.5 << std::endl;
+            if (error < epsilon)
+            {
+                std::cout << "error is zero yo" << std::endl;
+                break;
+            }
+
+            Eigen::MatrixXf J = Eigen::MatrixXf(warped.size(), 6);
+            for (size_t i = 0; i < sparse_inverse_depth[pi].size(); i++)
+            {
+                auto& p = sparse_inverse_depth[pi][i];
+                J.row(i) = image_pose_jacobian(gradient, p.x, p.y, p.inverse_depth, pyr);
+            }
+            std::cout << 5 << std::endl;
+
+            Eigen::MatrixXf J_t_weights = J.transpose() * weights;
+            ksi = new_ksi;
+            //delta_ksi = se3((J_t_weights * J).inverse() * J_t_weights * residuals);
+            delta_ksi = se3((J_t_weights * J).jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV)
+                            .solve(-J_t_weights * residuals).topLeftCorner<6, 1>());
+
+            std::cout << 6 << std::endl;
+            std::cout << "ksi: " << std::endl << ksi.omega << std::endl
+                      << ksi.nu << std::endl;
+            std::cout << "delta_ksi: " << std::endl << delta_ksi.omega << std::endl
+                      << delta_ksi.nu << std::endl;
+            std::cout << "new_ksi: " << std::endl << new_ksi.omega << std::endl
+                      << new_ksi.nu << std::endl;
+            std::cout << "error: " << error << std::endl;
+            if (std::abs(error - last_error) < epsilon)
+                break;
+
+            last_error = error;
+        }
+        //plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, weighting);
+    }
+    plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, weighting);
+    exit(0);
 
     std::cout << "returning " << std::endl << ksi << std::endl;
     std::cout << "exped " << std::endl << ksi.exp().matrix() << std::endl;
     return ksi.exp();
+}
+
+studd::two<Image> fuse_depth(const studd::two<Image>& lhs, const studd::two<Image>& rhs)
+{
+    studd::two<Image> output = studd::make_two(Image::Zero(lhs[0].rows(), lhs[0].cols()),
+                                               Image::Zero(lhs[0].rows(), lhs[0].cols()));
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            auto fused = gaussian(lhs[0](y, x), lhs[1](y, x)) ^ gaussian(rhs[0](y, x), rhs[1](y, x));
+            output[0](y, x) = fused.mean;
+            output[1](y, x) = fused.variance;
+        }
+    }
+    return output;
 }
 
 int main(int argc, const char* argv[])
@@ -759,18 +1162,35 @@ int main(int argc, const char* argv[])
     K(1, 2) = principal_point.y();
     K(2, 2) = 1;
 
-    unsigned int frame_skip = 1;
+    unsigned int frame_skip = 3;
 
     Eigen::Affine3f pose;
     Eigen::Matrix3f fundamental;
     std::tie(pose, fundamental) = keypoint_tracking(images[frame_skip + 1], images[1]);
+    std::cout << pose.matrix() << std::endl;
     auto epipole = get_epipole(pose);
+    studd::two<Image> inverse_depth = studd::make_two(Image::Zero(height, width),
+                                                       Image::Constant(height, width, -1));
+    std::cout << "epipole: " << std::endl << epipole << std::endl;
     for (size_t i = frame_skip + 1; i < 50000; i += frame_skip)
     {
+        std::cerr << "tick " << i << std::endl;
         std::cout << "pose: " << std::endl << pose.matrix() << std::endl;
         std::cout << "fundamental: " << std::endl << fundamental << std::endl;
         std::cout << "m" << 0 << std::endl;
+        std::cout << "i: " << i << std::endl;
         auto epilines = generate_epilines(images[i], images[i - frame_skip], fundamental);
+        cv::Mat epim = cv::Mat::zeros(height, width, CV_32FC3);
+        cv::Mat r, g, b = cv::Mat::zeros(height, width, CV_32F);
+        cv::eigen2cv(images[i], r);
+        cv::eigen2cv(images[i - frame_skip], g);
+        cv::merge(std::vector<cv::Mat>({b, g, r}), epim);
+        for (int j = 0; j < epilines.size(); j += 3723)
+        {
+            cv::line(epim, cv::Point2f(epilines[j].point.x(), epilines[j].point.y()), cv::Point2f(epipole.x(), epipole.y()), cv::Scalar(255, 255, 255));
+            //cv::line(epim, cv::Point2f(epilines[j].point.x(), epilines[j].point.y()), cv::Point2f(epilines[j].point.x(), epilines[j].point.y()) + cv::Point2f(epilines[j].line.x(), epilines[j].line.y()) * 100, cv::Scalar(255, 255, 0));
+        }
+        //cv::imshow("epim new", epim);
         std::cout << "m" << 0.1 << std::endl;
         studd::two<Image> gradient = sobel(images[i - frame_skip]);
         std::cout << "m" << 1 << std::endl;
@@ -795,7 +1215,7 @@ int main(int argc, const char* argv[])
                 auto photo = photometric_disparity(images[i], images[i - frame_skip], gradient,
                                                    epilines[j], x, y, disp, epipole);
 
-                if (std::min(geo.variance, photo.variance) > 0.001)
+                if (std::min(geo.variance, photo.variance) > 0.01)
                 {
                     masked(y, x) = 0;
                     if (photo.variance < geo.variance)
@@ -806,9 +1226,9 @@ int main(int argc, const char* argv[])
                 else
                 {
                     geometric[0](y, x) = std::abs(geo.mean);
-                    geometric[1](y, x) = std::abs(geo.variance);
+                    geometric[1](y, x) = geo.variance;
                     photometric[0](y, x) = std::abs(photo.mean);
-                    photometric[1](y, x) = std::abs(photo.variance);
+                    photometric[1](y, x) = photo.variance;
                 }
                 j++;
             }
@@ -822,14 +1242,15 @@ int main(int argc, const char* argv[])
             {
                 auto geo_var = geometric[1](y, x);
                 auto photo_var = photometric[1](y, x);
-                if (std::min(geo_var, photo_var) > 0.001 || (geo_var == 0 && photo_var == 0))
+                if (std::min(geo_var, photo_var) > 0.01 || (geo_var == 0 && photo_var == 0))
                 {
-                    disparity[0](y, x) = -1;
-                    disparity[1](y, x) = 0;
+                    disparity[0](y, x) = 0;
+                    disparity[1](y, x) = -1;
                 }
                 else
                 {
                     // TODO: times alpha^2, figure out what alpha is
+                    disparity[0](y, x) = std::hypot(disparity[0](y, x), disparity[1](y, x));
                     disparity[1](y, x) = geo_var + photo_var;
                 }
             }
@@ -837,26 +1258,43 @@ int main(int argc, const char* argv[])
         std::cout << "m" << 4 << std::endl;
 
         // 1 / Z = d / (b * f)
-        float denom = ((pose.translation().norm()) * focal_length.y());
-        studd::two<Image> inverse_depth = studd::make_two(disparity[0] / denom,
-                                                          disparity[1] / denom);
+        float denum = ((pose.translation().norm()) * focal_length.y());
+        //show_rainbow("before", inverse_depth);
+        //show_rainbow("new", studd::make_two(disparity[0] / denum, disparity[1] / denum));
+        inverse_depth = fuse_depth(inverse_depth,
+                                   studd::make_two(disparity[0] / denum, disparity[1] / denum));
+        //show_rainbow("after", inverse_depth);
+        //cv::waitKey(0);
 
         inverse_depth = regularize_depth(inverse_depth[0], inverse_depth[1]);
         std::cout << "m" << 5 << std::endl;
 
         // TODO: outlier removal
 
-        std::vector<pixel> sparse_inverse_depth;
-        sparse_inverse_depth.reserve(height * width);
-        for (int y = 0; y < height; y++)
+        //show("photometric", photometric[1], true, 4);
+        //show("geometric", geometric[1], true, 4);
+        //show("gradient x", gradient[0], true);
+        //show("gradient y", gradient[1], true);
+        //show("disparity mean", disparity[0], true);
+        //show("disparity variance", disparity[1], true, 4);
+        //show("regularized depth mean", inverse_depth[0], true);
+        //show("masked", masked);
+
+        std::vector<std::vector<pixel>> sparse_inverse_depth;
+        //sparse_inverse_depth.reserve(height * width);
+        for (int pyr = 32; pyr > 0; pyr /= 2)
         {
-            for (int x = 0; x < width; x++)
+            sparse_inverse_depth.emplace_back();
+            for (int y = 0; y < height; y += pyr)
             {
-                auto inv_mean = inverse_depth[0](y, x);
-                auto inv_var = inverse_depth[1](y, x);
-                if (inv_var >= 0 && inv_mean != 0)
+                for (int x = 0; x < width; x += pyr)
                 {
-                    sparse_inverse_depth.emplace_back(inv_mean, inv_var, x, y);
+                    auto inv_mean = inverse_depth[0](y, x);
+                    auto inv_var = inverse_depth[1](y, x);
+                    if (inv_var >= 0 && inv_mean != 0)
+                    {
+                        sparse_inverse_depth.back().emplace_back(inv_mean, inv_var, x, y);
+                    }
                 }
             }
         }
@@ -870,6 +1308,6 @@ int main(int argc, const char* argv[])
         std::cout << fundamental << std::endl << epipole << std::endl;
 
         std::cout << "m" << 6 << std::endl;
-        cv::waitKey(1000);
+        //cv::waitKey(1000);
     }
 }
