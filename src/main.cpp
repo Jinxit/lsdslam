@@ -24,6 +24,8 @@
 #include "se3.hpp"
 #include "eigen_utils.hpp"
 #include "loader.hpp"
+#include "disparity.hpp"
+#include "epiline.hpp"
 
 constexpr int max_pyramid = 4;
 
@@ -176,15 +178,6 @@ std::pair<Eigen::Affine3f, Eigen::Matrix3f> keypoint_tracking(const Image& new_i
     return {pose, fundamental_eigen};
 }
 
-struct epiline
-{
-    epiline(const Eigen::Vector2i point, const Eigen::Vector3f line)
-        : point(point), line(line) { };
-
-    Eigen::Vector2i point;
-    Eigen::Vector3f line;
-};
-
 epiline generate_epiline(const Eigen::Vector2i& p, const Eigen::Matrix3f& fundamental)
 {
     Eigen::Vector3f line = fundamental * Eigen::Vector3f(p.x(), p.y(), 1);
@@ -219,151 +212,11 @@ Eigen::Vector2f get_epipole(const Eigen::Affine3f& transform, const Eigen::Matri
     return homogenous.topLeftCorner<2, 1>() / homogenous[2];
 }
 
-studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline, int height, int width)
-{
-    auto fx = [&](float x) {
-        return -(epiline[0] * x + epiline[2]) / epiline[1];
-    };
-    auto fy = [&](float y) {
-        return -(epiline[1] * y + epiline[2]) / epiline[0];
-    };
-    float x0 = 0;
-    float y0 = fx(0);
-    if (y0 < 0)
-    {
-        y0 = 0;
-        x0 = fy(y0);
-    }
-    else if (y0 > height)
-    {
-        y0 = height;
-        x0 = fy(y0);
-    }
-
-    float x1 = width;
-    float y1 = fx(width);
-    if (y1 < 0)
-    {
-        y1 = 0;
-        x1 = fy(y1);
-    }
-    else if (y1 > height)
-    {
-        y1 = height;
-        x1 = fy(y1);
-    }
-
-    return studd::make_two(Eigen::Vector2f(x0, y0), Eigen::Vector2f(x1, y1));
-}
-
-studd::two<Image> disparity_epiline_ssd(
-    const Image& new_image, const Image& ref_image,
-    const Eigen::Matrix3f& fundamental, const std::vector<epiline>& epilines,
-    const Eigen::Vector2f& epipole)
-{
-    constexpr float epiline_sample_distance = 5.0f;
-    constexpr size_t num_epiline_samples = 5; // must be odd
-    constexpr int half_epiline_samples = num_epiline_samples / 2;
-
-    auto height = new_image.rows();
-    auto width = new_image.cols();
-
-    studd::two<Image> disparity = studd::make_two(Image::Zero(height, width),
-                                                  Image::Zero(height, width));
-    cv::Mat disps = cv::Mat::zeros(height, width, CV_8UC3);
-
-    auto safe = [&](const Eigen::Vector2f& p) {
-        return p.x() >= 0 && p.y() >= 0 && p.x() < width && p.y() < height;
-    };
-
-    auto ssd = [&](const std::array<float, num_epiline_samples> target,
-                   Eigen::Vector2f p, const Eigen::Vector2f& dp) {
-        float total = 0;
-        for (size_t i = 0; i < num_epiline_samples; i++)
-        {
-            if (!safe(p))
-                total += 1000;
-            else
-                total += studd::square(target[i] - new_image(p.y(), p.x()));
-
-            p += dp;
-        }
-
-        return total;
-    };
-
-    float min_disp = 10000000;
-    float max_disp = 0;
-    float avg_disp = 0;
-
-    int i = 0;
-    for (auto&& epi : epilines)
-    {
-        //std::cout << "line " << i << " out of " << epilines.size() << std::endl;
-        i++;
-        Eigen::Vector2f p0, p1;
-        std::tie(p0, p1) = epiline_limits(epi.line, height, width);
-
-        std::array<float, num_epiline_samples> target{0};
-        auto p = p0;
-        Eigen::Vector2f dp = (p1 - p0).normalized() * epiline_sample_distance;
-
-        // set up target values;
-        for (int i = 0; i < int(num_epiline_samples); i++)
-        {
-            Eigen::Vector2f point = epi.point.cast<float>() + dp * float(i - half_epiline_samples);
-
-            if (safe(point))
-                target[i] = float(ref_image(point.y(), point.x()));
-        }
-
-        // find distance for n steps
-        Eigen::Vector2f dp_total = dp * int(num_epiline_samples - 1);
-
-        float min_ssd = std::numeric_limits<float>::infinity();
-        Eigen::Vector2f min_p(-1000, -1000);
-        // keep going for the rest of the line
-        while (safe(p + dp_total))
-        {
-            if (safe(p + dp_total))
-            {
-                float current_ssd = ssd(target, p, dp);
-
-                if (current_ssd < min_ssd)
-                {
-                    min_ssd = current_ssd;
-                    min_p = p + dp_total / 2;
-                }
-            }
-
-            p += dp;
-        }
-
-        if (min_p.x() == -1000)
-        {
-            continue;
-        }
-
-        disparity[0](epi.point.y(), epi.point.x()) = min_p.x() - epi.point.x();
-        disparity[1](epi.point.y(), epi.point.x()) = min_p.y() - epi.point.y();
-
-        auto disp_n = (epi.point.cast<float>() - min_p).norm();
-        if (disp_n > max_disp)
-            max_disp = disp_n;
-        if (disp_n < min_disp)
-            min_disp = disp_n;
-        avg_disp += disp_n;
-    }
-    avg_disp /= epilines.size();
-
-    return disparity;
-}
-
 Image random_inverse_depth(int height, int width)
 {
     static std::mt19937 gen;
     static std::uniform_real_distribution<float> dist(0.1, 2);
-    Image depth = Image::Zero(height, width);
+    Image depth(height, width);
 
     for (int y = 0; y < height; y++)
     {
@@ -524,7 +377,7 @@ Matrix<1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
                                  float x, float y, float inverse_depth,
                                  const Eigen::Matrix3f& intrinsic, int pyr)
 {
-    Matrix<1, 2> J_I = Matrix<1, 2>::Zero();
+    Matrix<1, 2> J_I;
     J_I(0, 0) = gradient[0](y / pyr, x / pyr);
     J_I(0, 1) = gradient[1](y / pyr, x / pyr);
 
@@ -586,7 +439,7 @@ std::pair<Eigen::VectorXf, Eigen::DiagonalMatrix<float, Eigen::Dynamic>> residua
     const Image& new_image, const Image& ref_image,
     const std::function<float(float)>& weighting)
 {
-    Eigen::VectorXf residuals = Eigen::VectorXf::Zero(sparse_inverse_depth.size());
+    Eigen::VectorXf residuals(sparse_inverse_depth.size());
     Eigen::DiagonalMatrix<float, Eigen::Dynamic> weights(sparse_inverse_depth.size());
 
     for (size_t i = 0; i < warped.size(); i++)
@@ -604,6 +457,7 @@ std::pair<Eigen::VectorXf, Eigen::DiagonalMatrix<float, Eigen::Dynamic>> residua
         }
         else
         {
+            residuals(i) = 0;
             weights.diagonal()[i] = 0;
         }
     }
@@ -680,7 +534,7 @@ void plot_errors(const se3& id,
     auto lerp = [](float v0, float v1, float t) {
         return (1 - t) * v0 + t * v1;
     };
-    /*for (float t = 0.0f; t <= 1.0f; t += 0.005f)
+    for (float t = 0.0f; t <= 1.0f; t += 0.005f)
     {
         calc_error(se3(lerp(0, id.omega[0], t),
                        lerp(0, id.omega[1], t),
@@ -688,8 +542,9 @@ void plot_errors(const se3& id,
                        lerp(0, id.nu[0], t),
                        lerp(0, id.nu[1], t),
                        lerp(0, id.nu[2], t)), true);
-    }*/
-/*
+    }
+    return;
+
     for (float val = -50.0f; val < 50.0f; val += 5.0f)
     {
         calc_error(id ^ se3(0, 0, 0, val, 0, 0), true);
@@ -714,7 +569,7 @@ void plot_errors(const se3& id,
     {
         calc_error(id ^ se3(0, 0, val, 0, 0, 0), true);
     }
-    exit(0);*/
+    exit(0);
 
     auto start = std::chrono::steady_clock::now();
     //std::cout << "errors" << std::endl;
@@ -873,7 +728,7 @@ Eigen::Affine3f photometric_tracking(const std::vector<std::vector<pixel>>& spar
                 {
                     std::cerr << "erroring" << std::endl;
                     std::cerr << sparse_inverse_depth[pi].size() << std::endl;
-                    plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, intrinsic, weighting);
+                    //plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, intrinsic, weighting);
                     exit(1);
                 }
                 new_ksi = ksi ^ delta_ksi;
@@ -905,7 +760,7 @@ Eigen::Affine3f photometric_tracking(const std::vector<std::vector<pixel>>& spar
             }
             std::cout << 3 << std::endl;
 
-            Image ref_resized = Image::Zero(height / pyr, width / pyr);
+            Image ref_resized(height / pyr, width / pyr);
             for (int y = 0; y < height; y += pyr)
             {
                 for (int x = 0; x < width; x += pyr)
@@ -979,8 +834,8 @@ Eigen::Affine3f photometric_tracking(const std::vector<std::vector<pixel>>& spar
         }
         //plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, weighting);
     }
-    plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, intrinsic, weighting);
-    exit(0);
+    //plot_errors(ksi, sparse_inverse_depth[pi], new_image, ref_image, intrinsic, weighting);
+    //exit(0);
 
     std::cout << "returning " << std::endl << ksi << std::endl;
     std::cout << "exped " << std::endl << ksi.exp().matrix() << std::endl;
@@ -989,8 +844,8 @@ Eigen::Affine3f photometric_tracking(const std::vector<std::vector<pixel>>& spar
 
 studd::two<Image> fuse_depth(const studd::two<Image>& lhs, const studd::two<Image>& rhs)
 {
-    studd::two<Image> output = studd::make_two(Image::Zero(lhs[0].rows(), lhs[0].cols()),
-                                               Image::Zero(lhs[0].rows(), lhs[0].cols()));
+    studd::two<Image> output = studd::make_two(Image(lhs[0].rows(), lhs[0].cols()),
+                                               Image(lhs[0].rows(), lhs[0].cols()));
     for (int y = 0; y < lhs[0].rows(); y++)
     {
         for (int x = 0; x < lhs[0].cols(); x++)
@@ -1021,11 +876,13 @@ int main(int argc, const char* argv[])
     studd::two<Image> inverse_depth = studd::make_two(Image::Zero(height, width),
                                                        Image::Constant(height, width, -1));
     std::cout << "epipole: " << std::endl << epipole << std::endl;
+
+    int count = 0;
     for (size_t i = frame_skip + 1; i < 50000; i += frame_skip)
     {
+        auto start = std::chrono::steady_clock::now();
         auto new_image = data[i].left;
         auto ref_image = data[i - frame_skip].left;
-        std::cerr << "tick " << i << std::endl;
         std::cout << "pose: " << std::endl << pose.matrix() << std::endl;
         std::cout << "fundamental: " << std::endl << fundamental << std::endl;
         std::cout << "m" << 0 << std::endl;
@@ -1046,12 +903,12 @@ int main(int argc, const char* argv[])
         studd::two<Image> gradient = sobel(ref_image);
         std::cout << "m" << 1 << std::endl;
 
-        studd::two<Image> disparity = disparity_epiline_ssd(new_image, ref_image,
-                                                            fundamental, epilines, epipole);
-        studd::two<Image> geometric = studd::make_two(Image::Zero(height, width),
-                                                      Image::Zero(height, width));
-        studd::two<Image> photometric = studd::make_two(Image::Zero(height, width),
-                                                        Image::Zero(height, width));
+        studd::two<Image> disparity = disparity_epilines(new_image, ref_image,
+                                                         epilines, epipole);
+        studd::two<Image> geometric = studd::make_two(Image(height, width),
+                                                      Image(height, width));
+        studd::two<Image> photometric = studd::make_two(Image(height, width),
+                                                        Image(height, width));
         Image masked = new_image;
         std::cout << "m" << 2 << std::endl;
         size_t j = 0;
@@ -1112,6 +969,8 @@ int main(int argc, const char* argv[])
         float denum = ((pose.translation().norm()) * data.get_calibration().left.intrinsic(1, 1));
         //show_rainbow("before", inverse_depth);
         //show_rainbow("new", studd::make_two(disparity[0] / denum, disparity[1] / denum));
+        inverse_depth[0] = Image::Zero(height, width);
+        inverse_depth[1] = Image::Zero(height, width);
         inverse_depth = fuse_depth(inverse_depth,
                                    studd::make_two(disparity[0] / denum, disparity[1] / denum));
         //show_rainbow("after", inverse_depth);
@@ -1161,5 +1020,10 @@ int main(int argc, const char* argv[])
 
         std::cout << "m" << 6 << std::endl;
         //cv::waitKey(1000);
+
+        count++;
+        auto end = std::chrono::steady_clock::now();
+        auto diff = end - start;
+        std::cerr << (std::chrono::duration<double, std::milli>(diff).count()) << " ms" << std::endl;
     }
 }
