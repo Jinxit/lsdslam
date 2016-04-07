@@ -5,6 +5,8 @@
 #include "two.hpp"
 #include "square.hpp"
 
+template<int Height, int Width>
+using Matrix = Eigen::Matrix<float, Height, Width>;
 using Image = Eigen::MatrixXf;
 
 inline Eigen::Matrix3f skewed(const Eigen::Vector3f& x)

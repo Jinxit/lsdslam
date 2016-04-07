@@ -25,10 +25,6 @@
 #include "eigen_utils.hpp"
 #include "dynamic_map.hpp"
 
-namespace fs = boost::filesystem;
-
-using Image = Eigen::MatrixXf;
-
 struct frame
 {
     Image left;
@@ -69,6 +65,8 @@ struct stereo_calibration
     calibration left;
     calibration right;
     Eigen::Matrix3f static_fundamental;
+    Eigen::Vector2i resolution;
+    Eigen::Affine3f transform;
 };
 
 class loader
@@ -81,12 +79,12 @@ public:
     stereo_calibration get_calibration() const { return c; }
 
 private:
+    Eigen::Affine3f pose_at(size_t i);
+
     std::string folder;
     stereo_calibration c;
     std::vector<size_t> indices;
     std::vector<std::pair<size_t, Eigen::Affine3f>> poses;
     studd::dynamic_map<size_t, Image> left_map;
     studd::dynamic_map<size_t, Image> right_map;
-
-    Eigen::Affine3f pose_at(size_t i);
 };

@@ -1,5 +1,7 @@
 #include "loader.hpp"
 
+namespace fs = boost::filesystem;
+
 namespace
 {
     std::function<Image(size_t)>
@@ -134,8 +136,6 @@ namespace
         cv::Mat T_cv = cv::Mat::zeros(3, 1, CV_64F);
         cv::eigen2cv(T.translation().matrix().eval(), T_cv);
         T_cv.convertTo(T_cv, CV_64F);
-        std::cout << left_intrinsic << std::endl;
-        std::cout << right_intrinsic << std::endl;
 
         cv::Mat left_rectification, right_rectification, left_perspective, right_perspective;
         cv::stereoRectify(left_intrinsic, output.left.distortion.as_vector(),
@@ -160,6 +160,10 @@ namespace
                                   * T.rotation() * output.left.intrinsic.transpose()
                                   * skewed(output.left.intrinsic * T.rotation().transpose()
                                          * T.translation());
+
+        output.resolution = Eigen::Vector2i(width, height);
+
+        output.transform = T;
 
         return output;
     }
