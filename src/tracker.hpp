@@ -19,16 +19,17 @@ struct keyframe
     Image left;
     Image right; // unnecessary?
     studd::two<Image> inverse_depth;
-    Eigen::Affine3f position;
+    Eigen::Affine3f pose;
 };
 
 class tracker
 {
 public:
-    tracker(const stereo_calibration& sc);
+    tracker(const stereo_calibration& sc, const Eigen::Affine3f& pose,
+            const Image& new_left, const Image& new_right);
 
     Eigen::Affine3f update(const Image& new_left, const Image& new_right);
-    Eigen::Affine3f get_position() const { return position; }
+    Eigen::Affine3f get_pose() const { return pose; }
 
 private:
     studd::two<Image> static_stereo(const Image& left, const Image& right,
@@ -37,7 +38,7 @@ private:
                                       const studd::two<Image>& gradient,
                                       const Eigen::Affine3f& transform);
 
-    Eigen::Affine3f position;
+    Eigen::Affine3f pose;
     stereo_calibration sc;
     keyframe kf;
     std::vector<epiline> stereo_epilines;

@@ -7,6 +7,7 @@
 #include "square.hpp"
 #include "se3.hpp"
 #include "eigen_utils.hpp"
+#include "misc_utils.hpp"
 
 struct pixel
 {
@@ -40,6 +41,11 @@ inline Matrix<1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
     {
         J_g(i, i    ) = x;
         J_g(i, i + 3) = y;
+        if (inverse_depth == 0)
+        {
+            std::cout << x << " " << y << " " << pyr << std::endl << intrinsic << std::endl;
+            exit(1);
+        }
         J_g(i, i + 6) = 1.0 / inverse_depth;
         J_g(i, i + 9) = 1;
     }
@@ -114,26 +120,28 @@ residuals_and_weights(const std::vector<pixel>& sparse_inverse_depth,
     return {residuals, weights};
 }
 
-inline Eigen::Affine3f
-photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth,
-                     const Image& new_image, const Image& ref_image,
-                     const Eigen::Matrix3f& intrinsic,
-                     const std::function<float(float)>& weighting)
+inline se3 photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth,
+                                const Image& new_image, const Image& ref_image,
+                                const Eigen::Matrix3f& intrinsic,
+                                const std::function<float(float)>& weighting)
 {
     constexpr size_t max_iterations = 10;
     constexpr float epsilon = 1e-9;
 
     auto height = new_image.rows();
     auto width = new_image.cols();
+    auto max_pyramid = std::pow(2, sparse_inverse_depth.size() - 1);
 
     se3 ksi;
     se3 delta_ksi;
     float last_error = std::numeric_limits<float>::infinity();
 
     int pyr_i = -1;
-    for (int pyr = std::pow(2, sparse_inverse_depth.size() - 1); pyr > 0; pyr /= 2)
+    for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
     {
         pyr_i++;
+        std::cout << "pyr:   " << pyr << std::endl;
+        std::cout << "pyr_i: " << pyr_i << std::endl;
         if (sparse_inverse_depth[pyr_i].size() == 0)
             continue;
 
@@ -141,7 +149,7 @@ photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth
         {
             se3 new_ksi;
             std::vector<pixel> warped;
-            if (i != 0)
+            if (i != 0 || pyr != max_pyramid)
             {
                 if (delta_ksi.omega[0] != delta_ksi.omega[0])
                 {
@@ -188,9 +196,10 @@ photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth
                         / sparse_inverse_depth[pyr_i].size());
 
             // consider switching to (last_error - error) / last_error < eps, according to wiki
-            //if (error > last_error)
-            if (error - last_error > 1e-2)
+            if (error > last_error)
+            //if (error - last_error > 1e-2)
             {
+                std::cout << "berror: " << error << std::endl;
                 std::cout << "BOOM" << std::endl;
                 delta_ksi = se3();
                 break;
@@ -207,16 +216,15 @@ photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth
                 auto& p = sparse_inverse_depth[pyr_i][i];
                 J.row(i) = image_pose_jacobian(gradient, p.x, p.y, p.inverse_depth, intrinsic, pyr);
             }
-            std::cout << 5 << std::endl;
 
             Eigen::MatrixXf J_t_weights = J.transpose() * weights;
             ksi = new_ksi;
             //delta_ksi = se3((J_t_weights * J).inverse() * J_t_weights * residuals);
             delta_ksi = se3((J_t_weights * J).jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV)
-                            .solve(-J_t_weights * residuals).topLeftCorner<6, 1>());
+                            .solve(J_t_weights * residuals).topLeftCorner<6, 1>());
 
-            std::cout << 6 << std::endl;
-            std::cout << "new_ksi: " << new_ksi << std::endl;
+            std::cout << "ksi:       " << ksi << std::endl;
+            std::cout << "delta_ksi: " << delta_ksi << std::endl;
             std::cout << "error: " << error << std::endl;
             if (std::abs(error - last_error) < epsilon)
                 break;
@@ -225,5 +233,5 @@ photometric_tracking(const std::vector<std::vector<pixel>>& sparse_inverse_depth
         }
     }
 
-    return ksi.exp();
+    return ksi;
 }

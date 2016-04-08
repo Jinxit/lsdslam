@@ -182,7 +182,7 @@ inline studd::two<Image> disparity_rectified(const Image& new_image, const Image
                                              const studd::two<Image>& gradient)
 {
     // TODO: split into sample distance and sample delta
-    constexpr float epiline_sample_distance = 5.0f;
+    constexpr float epiline_sample_distance = 1.0f;
     constexpr float gradient_epsilon = 1e-2;
     constexpr size_t num_epiline_samples = 5; // must be odd
     constexpr int half_epiline_samples = num_epiline_samples / 2;

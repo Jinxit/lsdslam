@@ -1,10 +1,14 @@
 #include "tracker.hpp"
 
+#include "opencv2/core/core.hpp"
+#include "opencv2/highgui/highgui.hpp"
+
 #include "gaussian.hpp"
 #include "se3.hpp"
 #include "two.hpp"
 #include "photometric_tracking.hpp"
 #include "square.hpp"
+#include "misc_utils.hpp"
 
 namespace
 {
@@ -76,7 +80,7 @@ namespace
 
     std::vector<std::vector<pixel>> sparsify_depth(const studd::two<Image>& inverse_depth)
     {
-        constexpr int max_pyramid = 4;
+        constexpr int max_pyramid = 1;
 
         auto height = inverse_depth[0].rows();
         auto width = inverse_depth[0].cols();
@@ -93,7 +97,7 @@ namespace
                     auto inv_mean = inverse_depth[0](y, x);
                     auto inv_var = inverse_depth[1](y, x);
 
-                    if (inv_var >= 0)
+                    if (inv_var >= 0 && inv_mean != 0)
                     {
                         sparse_inverse_depth.back().emplace_back(inv_mean, inv_var, x, y);
                     }
@@ -112,14 +116,21 @@ namespace
     }
 }
 
-tracker::tracker(const stereo_calibration& sc)
-    : sc(sc),
+tracker::tracker(const stereo_calibration& sc, const Eigen::Affine3f& pose,
+                 const Image& new_left, const Image& new_right)
+    : pose(pose),
+      sc(sc),
       kf(sc.resolution.y(), sc.resolution.x()),
       stereo_epilines(generate_epilines(sc.resolution.y(), sc.resolution.x(),
                                         sc.static_fundamental)),
       stereo_epipole(generate_epipole(sc.transform, sc.left.intrinsic)),
       weighting([](float r) { return 1; })
-{ }
+{
+    auto gradient = sobel(new_left);
+    kf.inverse_depth = regularize_depth(static_stereo(new_left, new_right, gradient));
+    kf.left = new_left;
+    kf.right = new_right;
+}
 
 
 Eigen::Affine3f tracker::update(const Image& new_left, const Image& new_right)
@@ -133,13 +144,14 @@ Eigen::Affine3f tracker::update(const Image& new_left, const Image& new_right)
     auto transform = photometric_tracking(sparsify_depth(kf.inverse_depth),
                                           new_left, kf.left,
                                           sc.left.intrinsic,
-                                          weighting);
+                                          weighting).exp();
+    pose = transform * pose;
 
     if (transform.translation().norm() > keyframe_distance)
     {
         // initialize keyframe
         kf.inverse_depth = regularize_depth(kf.inverse_depth);
-        kf.position = position;
+        kf.pose = pose;
         kf.left = new_left;
         kf.right = new_right;
     }
@@ -190,6 +202,8 @@ studd::two<Image> tracker::static_stereo(const Image& left, const Image& right,
             j++;
         }
     }
+    show_rainbow("static_stereo", disparity, left);
+    cv::waitKey(0);
 
     return disparity;
 }

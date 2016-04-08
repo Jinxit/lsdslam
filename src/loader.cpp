@@ -25,7 +25,7 @@ namespace
         };
     }
 
-    bool timestamp_search(size_t i, const std::pair<size_t, Eigen::Affine3f>& pose)
+    bool timestamp_search(const std::pair<size_t, Eigen::Affine3f>& pose, size_t i)
     {
         return pose.first < i;
     }
@@ -192,15 +192,15 @@ frame loader::operator[](size_t i)
     frame output;
     output.left = left_map[indices[i]];
     output.right = right_map[indices[i]];
-    output.pose = pose_at(i);
+    output.pose = pose_at(indices[i]);
 
     return output;
 }
 
 Eigen::Affine3f loader::pose_at(size_t i)
 {
-    auto it_after = std::upper_bound(poses.begin(), poses.end(),
-                                     indices[i], &timestamp_search);
+    auto it_after = std::lower_bound(poses.begin(), poses.end(),
+                                     i, &timestamp_search);
     auto it_before = it_after;
     if (it_after->first == i)
     {
@@ -212,5 +212,6 @@ Eigen::Affine3f loader::pose_at(size_t i)
     }
 
     float t = float(i - it_before->first) / (it_after->first - it_before->first);
-    return interpolate(it_before->second, it_after->second, t);
+    auto interp = interpolate(it_before->second, it_after->second, t);
+    return interp;
 }
