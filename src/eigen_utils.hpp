@@ -36,9 +36,9 @@ ImageMatrix conv2d(const Eigen::MatrixBase<ImageMatrix>& image, const Eigen::Vec
     int half_rows = kernel.rows() / 2;
     int half_cols = kernel.cols() / 2;
 
-    for (int row = 0; row < image.rows(); row += stride[1])
+    for (int row = 0; row < image.rows(); row += stride.y())
     {
-        for (int col = 0; col < image.cols(); col += stride[0])
+        for (int col = 0; col < image.cols(); col += stride.x())
         {
             int a, b, c, d, y, x;
 
@@ -71,6 +71,24 @@ inline studd::two<Image> sobel(const Image& image)
 
     return studd::make_two(conv2d(image, Eigen::Vector2i::Ones(), kernel_x),
                            conv2d(image, Eigen::Vector2i::Ones(), kernel_y));
+}
+
+template<class ImageMatrix>
+ImageMatrix max_pool(const Eigen::MatrixBase<ImageMatrix>& image, const Eigen::Vector2i& stride)
+{
+    int sx = stride.x();
+    int sy = stride.y();
+    ImageMatrix output(image.rows() / sy, image.cols() / sx);
+
+    for (int row = 0; row < output.rows(); row++)
+    {
+        for (int col = 0; col < output.cols(); col++)
+        {
+            output(row, col) = image.block(row * sy, col * sx, sy, sx).maxCoeff();
+        }
+    }
+
+    return output;
 }
 
 inline Eigen::Affine3f interpolate(const Eigen::Affine3f lhs, const Eigen::Affine3f rhs, float t)
