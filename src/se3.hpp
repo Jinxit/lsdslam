@@ -33,7 +33,7 @@ struct se3
                                 + ((1 - std::cos(w_norm)) / w_norm2) * skew2;
         Eigen::Matrix3f V = Eigen::Matrix3f::Identity()
                           + ((1 - std::cos(w_norm)) / w_norm2) * skew
-                          + ((1 - std::sin(w_norm)) / (w_norm * w_norm2)) * skew2;
+                          + ((w_norm - std::sin(w_norm)) / (w_norm * w_norm2)) * skew2;
 
         Eigen::Matrix4f output = Eigen::Matrix4f::Zero();
         output.topLeftCorner<3, 3>() = e_omega;

@@ -18,9 +18,10 @@ namespace
             {
                 for (int x = 0; x < image.cols; x++)
                 {
-                    output(y, x) = image.at<unsigned char>(y, x) / 255.0;
+                    output(y, 751 - x) = image.at<unsigned char>(y, x) / 255.0;
                 }
             }
+
             return output;
         };
     }

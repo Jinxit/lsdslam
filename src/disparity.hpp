@@ -4,10 +4,18 @@
 
 #include <eigen3/Eigen/Dense>
 
+#include "opencv2/core/core.hpp"
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/imgcodecs/imgcodecs.hpp"
+#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/core/eigen.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+
 #include "two.hpp"
 #include "epiline.hpp"
 #include "eigen_utils.hpp"
 #include "gaussian.hpp"
+#include "misc_utils.hpp"
 
 inline gaussian geometric_disparity(const studd::two<Image>& gradient,
                                     const epiline& epi, int x, int y,
@@ -44,8 +52,13 @@ inline gaussian photometric_disparity(const Image& new_image,
     // semi-dense visual odometry, equation 8 and 9
     Eigen::Vector2f lambda_0 = Eigen::Vector2f(disparity_0[0] + epi.point.x(),
                                                disparity_0[1] + epi.point.y());
-    auto disparity = disparity_0.norm()
-                   + (ref_image(y, x) - new_image(lambda_0.y(), lambda_0.x())) / g_p;
+    float lambda_disp = 0;
+    if (lambda_0.x() >= 0 && lambda_0.x() < new_image.cols() &&
+        lambda_0.y() >= 0 && lambda_0.y() < new_image.cols())
+    {
+        lambda_disp = new_image(lambda_0.y(), lambda_0.x());
+    }
+    auto disparity = disparity_0.norm() + (ref_image(y, x) - lambda_disp) / g_p;
     auto variance = (sigma_i * sigma_i) / (g_p * g_p);
     return gaussian(disparity, variance);
 }
@@ -181,14 +194,36 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
 inline studd::two<Image> disparity_rectified(const Image& new_image, const Image& ref_image,
                                              const studd::two<Image>& gradient)
 {
+    /*auto sbm = cv::StereoBM::create(112, 9);
+
+    cv::Mat leftimage, rightimage, disp;
+    cv::eigen2cv(new_image, rightimage);
+    rightimage.convertTo(rightimage, CV_8U, 255);
+    cv::eigen2cv(ref_image, leftimage);
+    leftimage.convertTo(leftimage, CV_8U, 255);
+    sbm->compute(rightimage, leftimage, disp);
+    cv::imshow("left", leftimage);
+    cv::imshow("right", rightimage);
+    disp = disp / 16;
+    disp.convertTo(disp, CV_8U);
+    cv::imshow("dispcv", disp);
+    Image uh;
+    cv::cv2eigen(disp, uh);
+    show_rainbow("dispeig", studd::two<Image>(uh, Image::Constant(new_image.rows(), new_image.cols(), 1).eval()), new_image);
+    cv::waitKey(0);*/
+
+
+
+
     // TODO: split into sample distance and sample delta
     constexpr float epiline_sample_distance = 1.0f;
-    constexpr float gradient_epsilon = 1e-2;
-    constexpr size_t num_epiline_samples = 5; // must be odd
+    constexpr float gradient_epsilon = 1e-1;
+    constexpr size_t num_epiline_samples = 7; // must be odd
     constexpr int half_epiline_samples = num_epiline_samples / 2;
+    constexpr int disparity_range = 50;
 
-    auto height = new_image.rows();
-    auto width = new_image.cols();
+    int height = new_image.rows();
+    int width = new_image.cols();
 
     studd::two<Image> disparity = studd::make_two(Image::Zero(height, width),
                                                   Image::Zero(height, width));
@@ -199,10 +234,11 @@ inline studd::two<Image> disparity_rectified(const Image& new_image, const Image
         float total = 0;
         for (size_t i = 0; i < num_epiline_samples; i++)
         {
-            if (!(x >= 0 && x < width))
-                total += 1000;
+            if (!(x >= 0 && x < width - 1))
+                total += studd::square(target[i]);
             else
-                total += studd::square(target[i] - new_image(y, x));
+                total += studd::square(target[i] - interpolate(new_image,
+                                                               Eigen::Vector2f(x, y)));
 
             x += dx;
         }
@@ -211,9 +247,9 @@ inline studd::two<Image> disparity_rectified(const Image& new_image, const Image
     };
 
     Eigen::Vector2f dp(epiline_sample_distance, 0);
-    for (int yo = 0; yo < height; yo++)
+    for (int yo = 0; yo < height - 1; yo++)
     {
-        for (int xo = 0; xo < width; xo++)
+        for (int xo = 0; xo < width - 1; xo++)
         {
             if (gradient[0](yo, xo) < gradient_epsilon)
             {
@@ -229,29 +265,33 @@ inline studd::two<Image> disparity_rectified(const Image& new_image, const Image
                                                            * float(i - half_epiline_samples),
                                                         yo);
 
-                if (point.x() >= 0 && point.x() < width)
-                    target[i] = ref_image(point.y(), point.x());
+                if (point.x() >= 0 && point.x() < width - 1)
+                    target[i] = interpolate(ref_image, point);
             }
 
             float min_ssd = std::numeric_limits<float>::infinity();
             float min_x = -1000;
-            for (int x0 = 0; x0 + epiline_sample_distance * num_epiline_samples < height; x0++)
+            for (float x0 = xo - disparity_range; x0 < xo + disparity_range;
+                 x0 += epiline_sample_distance)
             {
-                float current_ssd = ssd(target, x0, yo, epiline_sample_distance);
+                auto sx = x0 - epiline_sample_distance * half_epiline_samples;
+                float current_ssd = ssd(target, sx, yo, epiline_sample_distance);
 
                 if (current_ssd < min_ssd)
                 {
                     min_ssd = current_ssd;
-                    min_x = x0 + epiline_sample_distance * half_epiline_samples;
+                    min_x = x0;
                 }
             }
 
             if (min_x == -1000)
             {
-                continue;
+                disparity[1](yo, xo) = -1;
             }
-
-            disparity[0](yo, xo) = min_x - xo;
+            else
+            {
+                disparity[0](yo, xo) = min_x - xo;
+            }
         }
     }
 

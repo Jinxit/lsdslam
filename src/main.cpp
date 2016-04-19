@@ -47,11 +47,13 @@ int main(int argc, const char* argv[])
 
     auto first_frame = data[start_offset];
     auto t = tracker(sc, first_frame.pose, first_frame.left, first_frame.right);
-    for (size_t i = start_offset + 1; i < 10000; i += frame_skip)
+    for (size_t i = start_offset + frame_skip; i < 10000; i += frame_skip)
     {
-        auto start = std::chrono::steady_clock::now();
+        std::cout << "original pose:" << std::endl << t.get_pose().matrix() << std::endl;
         auto new_frame = data[i];
-        auto travelled = t.update(new_frame.left, new_frame.right);
+        auto guess = data[i - frame_skip].pose.inverse() * new_frame.pose;
+        auto start = std::chrono::steady_clock::now();
+        auto travelled = t.update(new_frame.left, new_frame.right, guess);//Eigen::Affine3f(Eigen::Matrix4f::Identity()));
         auto end = std::chrono::steady_clock::now();
         auto dt = end - start;
         std::cerr << (std::chrono::duration<double, std::milli>(dt).count()) << " ms" << std::endl;
@@ -60,7 +62,7 @@ int main(int argc, const char* argv[])
         std::cout << "diff: " << std::endl;
         report(t.get_pose().inverse() * new_frame.pose);
         std::cout << "correct travelled: " << std::endl;
-        report(data[i - frame_skip].pose.inverse() * new_frame.pose);
+        report(guess);
         std::cout << "we travelled: " << std::endl;
         report(travelled);
     }

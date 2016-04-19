@@ -78,36 +78,6 @@ namespace
         return output;
     }
 
-    std::vector<std::vector<pixel>> sparsify_depth(const studd::two<Image>& inverse_depth)
-    {
-        constexpr int max_pyramid = 1;
-
-        auto height = inverse_depth[0].rows();
-        auto width = inverse_depth[0].cols();
-
-        std::vector<std::vector<pixel>> sparse_inverse_depth;
-        //sparse_inverse_depth.reserve(height * width);
-        for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
-        {
-            sparse_inverse_depth.emplace_back();
-            for (int y = 0; y < height; y += pyr)
-            {
-                for (int x = 0; x < width; x += pyr)
-                {
-                    auto inv_mean = inverse_depth[0](y, x);
-                    auto inv_var = inverse_depth[1](y, x);
-
-                    if (inv_var >= 0 && inv_mean != 0)
-                    {
-                        sparse_inverse_depth.back().emplace_back(inv_mean, inv_var, x, y);
-                    }
-                }
-            }
-        }
-
-        return sparse_inverse_depth;
-    }
-
     Eigen::Matrix3f fundamental_from_transform(const Eigen::Affine3f& transform,
                                                const Eigen::Matrix3f& intrinsic)
     {
@@ -132,24 +102,128 @@ tracker::tracker(const stereo_calibration& sc, const Eigen::Affine3f& pose,
     kf.right = new_right;
 }
 
+void tracker::play(const Image& new_left, const Image& new_right)
+{
+    int height = sc.resolution.y();
+    int width = sc.resolution.x();
+    se3 tf;
+    auto gradient = sobel(new_left);
+    auto s_stereo = static_stereo(new_left, new_right, gradient);
+    kf.inverse_depth = regularize_depth(fuse_depth(kf.inverse_depth, s_stereo));
+    auto sparse_depth = sparsify_depth(kf.inverse_depth);
 
-Eigen::Affine3f tracker::update(const Image& new_left, const Image& new_right)
+    while (true)
+    {
+        int key = cvWaitKey(0);
+        if (key == 1113938) // up
+        {
+            tf.nu.y() += 0.001;
+        }
+        if (key == 1113940) // down
+        {
+            tf.nu.y() -= 0.001;
+        }
+        if (key == 1113937) // left
+        {
+            tf.nu.x() += 0.001;
+        }
+        if (key == 1113939) // right
+        {
+            tf.nu.x() -= 0.001;
+        }
+        if (key == 1048689) // Q
+        {
+            tf.omega.x() += 0.001;
+        }
+        if (key == 1048673) // A
+        {
+            tf.omega.x() -= 0.001;
+        }
+        if (key == 1048695) // W
+        {
+            tf.omega.y() += 0.001;
+        }
+        if (key == 1048691) // S
+        {
+            tf.omega.y() -= 0.001;
+        }
+        if (key == 1048677) // E
+        {
+            tf.omega.z() += 0.001;
+        }
+        if (key == 1048676) // D
+        {
+            tf.omega.z() -= 0.001;
+        }
+        std::cout << tf << std::endl;
+
+        auto warped = warp(sparse_depth[0], sc.left.intrinsic, tf.exp());
+
+        Image warped_image = kf.left;//Image::Zero(height, width);
+        Image warped_image_inv_depth = Image::Zero(height, width);
+        for (size_t i = 0; i < warped.size(); i++)
+        {
+            int x = warped[i].first.x();
+            int y = warped[i].first.y();
+            if (x >= 0 && x < width && y >= 0 && y < height)
+            {
+                int sx = sparse_depth[0][i].first.x();
+                int sy = sparse_depth[0][i].first.y();
+
+                if (warped_image_inv_depth(y, x) < warped[i].second.mean)
+                {
+                    warped_image_inv_depth(y, x) = warped[i].second.mean;
+                    warped_image(y, x) = new_left(sy, sx);
+                }
+            }
+        }
+
+        show("warped", warped_image);
+    }
+}
+
+
+Eigen::Affine3f tracker::update(const Image& new_left, const Image& new_right, const Eigen::Affine3f& guess)
 {
     constexpr float keyframe_distance = 0.2;
 
+    //play(new_left, new_right);
+
     auto gradient = sobel(new_left);
     auto s_stereo = static_stereo(new_left, new_right, gradient);
-    kf.inverse_depth = fuse_depth(kf.inverse_depth, s_stereo);
+    show_rainbow("s_stereo", s_stereo, new_left);
+    cv::waitKey(0);
+    cv::destroyWindow("s_stereo");
+    auto sparse_s_stereo = sparsify_depth(s_stereo, 1)[0];
+    show_rainbow("keyframe", kf.inverse_depth, new_left);
+    cv::waitKey(0);
+    cv::destroyWindow("keyframe");
     
-    auto transform = photometric_tracking(sparsify_depth(kf.inverse_depth),
-                                          new_left, kf.left,
-                                          sc.left.intrinsic,
-                                          weighting).exp();
+    //auto transform = photometric_tracking(sparse_s_stereo,
+    //                                      new_left, kf.left,
+    //                                      sc.left.intrinsic,
+    //                                      weighting,
+    //                                      guess).exp();
+    auto transform = guess;
     pose = transform * pose;
+    auto warped_s_stereo = densify_depth(warp(sparse_s_stereo, sc.left.intrinsic,
+                                              transform.inverse()),
+                                         sc.resolution.y(), sc.resolution.x());
+    show_rainbow("warped_s_stereo", warped_s_stereo, new_left);
+    cv::waitKey(0);
+    cv::destroyWindow("warped_s_stereo");
+    kf.inverse_depth = fuse_depth(kf.inverse_depth, warped_s_stereo);
+    show_rainbow("fused_static", kf.inverse_depth, new_left);
+    cv::waitKey(0);
+    cv::destroyWindow("warped_s_stereo");
 
     if (transform.translation().norm() > keyframe_distance)
     {
+        std::cout << transform.translation() << std::endl;
+        std::cout << guess.translation() << std::endl;
+        std::cout << "new keyframe" << std::endl;
         // initialize keyframe
+        exit(1);
         kf.inverse_depth = regularize_depth(kf.inverse_depth);
         kf.pose = pose;
         kf.left = new_left;
@@ -159,8 +233,17 @@ Eigen::Affine3f tracker::update(const Image& new_left, const Image& new_right)
     {
         // TODO: this might need some warping OR just reversing new/ref
         auto t_stereo = temporal_stereo(new_left, kf.left, gradient, transform);
+        show_rainbow("t_stereo", t_stereo, new_left);
+        cv::waitKey(0);
+        cv::destroyWindow("s_stereo");
         kf.inverse_depth = fuse_depth(kf.inverse_depth, t_stereo);
+        show_rainbow("fused_temporal_static", kf.inverse_depth, new_left);
+        cv::waitKey(0);
+        cv::destroyWindow("s_stereo");
         kf.inverse_depth = regularize_depth(kf.inverse_depth);
+        show_rainbow("regularized", kf.inverse_depth, new_left);
+        cv::waitKey(0);
+        cv::destroyWindow("s_stereo");
     }
 
     return transform;
@@ -195,15 +278,15 @@ studd::two<Image> tracker::static_stereo(const Image& left, const Image& right,
             else
             {
                 // TODO: should this be done before photometric disparity?
-                disparity[0](y, x) /= bf;
+                disparity[0](y, x) = std::abs(disparity[0](y, x)) / bf;
                 // TODO: times alpha^2, figure out what alpha is
                 disparity[1](y, x) = geo.variance + photo.variance;
             }
             j++;
         }
     }
-    show_rainbow("static_stereo", disparity, left);
-    cv::waitKey(0);
+    //show_rainbow("static_stereo", disparity, left);
+    //cv::waitKey(0);
 
     return disparity;
 }

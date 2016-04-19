@@ -1,5 +1,5 @@
 CC=g++
-CFLAGS=-g -O3 --std=c++1z -Wall $(shell pkg-config opencv --cflags)
+CFLAGS=-g -Og --std=c++1z -Wall $(shell pkg-config opencv --cflags)
 LIBS=$(shell pkg-config opencv --libs) -lboost_system -lboost_filesystem -lyaml-cpp
 SOURCES=src/tracker.cpp src/loader.cpp src/main.cpp
 OBJECTS=$(SOURCES:.cpp=.o)

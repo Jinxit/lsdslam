@@ -28,7 +28,7 @@ public:
     tracker(const stereo_calibration& sc, const Eigen::Affine3f& pose,
             const Image& new_left, const Image& new_right);
 
-    Eigen::Affine3f update(const Image& new_left, const Image& new_right);
+    Eigen::Affine3f update(const Image& new_left, const Image& new_right, const Eigen::Affine3f& guess);
     Eigen::Affine3f get_pose() const { return pose; }
 
 private:
@@ -37,6 +37,7 @@ private:
     studd::two<Image> temporal_stereo(const Image& left, const Image& right,
                                       const studd::two<Image>& gradient,
                                       const Eigen::Affine3f& transform);
+    void play(const Image& new_left, const Image& new_right);
 
     Eigen::Affine3f pose;
     stereo_calibration sc;

@@ -37,11 +37,11 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
             }
         }
     }
-    cv::normalize(h, h, 360, 0, cv::NORM_INF);
+    cv::normalize(h, h, 255, 0, cv::NORM_INF);
     cv::Mat cv_image;
     cv::merge(std::vector<cv::Mat>{h, s, v}, cv_image);
     cv::cvtColor(cv_image, cv_image, CV_HSV2RGB);
-    for (int y = 0; y < height; y++)
+    /*for (int y = 0; y < height; y++)
     {
         for (int x = 0; x < width; x++)
         {
@@ -50,12 +50,12 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
                 cv_image.at<cv::Vec3f>(y, x) = cv::Vec3f(image[0](y, x), image[0](y, x), image[0](y, x));
             }
         }
-    }
+    }*/
     cv::imshow(title, cv_image);
 }
 
 /*inline void plot_errors(const se3& id,
-                        const std::vector<pixel>& sparse_inverse_depth,
+                        const sparse_gaussian& sparse_inverse_depth,
                         const Image& new_image,
                         const Image& ref_image,
                         const Eigen::Matrix3f& intrinsic,
