@@ -27,7 +27,8 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
     {
         for (int x = 0; x < width; x++)
         {
-            if (image[1](y, x) < 0 || x < 5 || x > width - 5 || y < 5 || y > height - 5)
+            if (image[1](y, x) < 0 || x < 5 || x > width - 5 || y < 5 || y > height - 5
+                || image[0](y, x) == -1.0f)
             {
                 v.at<float>(y, x) = 0;
             }

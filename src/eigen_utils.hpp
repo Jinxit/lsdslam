@@ -159,7 +159,7 @@ inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_dep
                                        int height, int width)
 {
     Image inv_depth = Image::Zero(height, width);
-    Image variance = Image::Zero(height, width);
+    Image variance = Image::Constant(height, width, -1);
 
     for (const auto& kvp : sparse_inverse_depth)
     {
@@ -193,19 +193,26 @@ inline sparse_gaussian warp(sparse_gaussian sparse_inverse_depth,
         auto variance = kvp.second.variance;
 
         // pi_1^-1
-        Eigen::Vector3f p2;
         p2[0] = (x - c_x) / (f_x * inv_depth);
         p2[1] = (y - c_y) / (f_y * inv_depth);
         p2[2] = 1.0 / inv_depth;
 
         // T
-        p2 = ksi * p2;
+        //p2 = ksi * p2;
 
-        // pi_2
-        kvp.first.x() = p2[0] * f_x / p2[2] + c_x;
-        kvp.first.y() = p2[1] * f_y / p2[2] + c_y;
-        kvp.second.mean = 1.0 / p2[2];
-        kvp.second.variance = std::pow(inv_depth / kvp.second.mean, 4) * variance;
+        if (p2[2] > 0)
+        {
+            // pi_2
+            kvp.first.x() = p2[0] * f_x / p2[2] + c_x;
+            kvp.first.y() = p2[1] * f_y / p2[2] + c_y;
+            kvp.second.mean = 1.0 / p2[2];
+            kvp.second.variance = std::pow(inv_depth / kvp.second.mean, 4) * variance;
+        }
+        else
+        {
+            kvp.second.mean = 0;
+            kvp.second.variance = -1;
+        }
     }
 
     return sparse_inverse_depth;

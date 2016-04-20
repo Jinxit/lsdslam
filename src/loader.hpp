@@ -80,6 +80,7 @@ public:
 
 private:
     Eigen::Affine3f pose_at(size_t i);
+    void recalibrate();
 
     std::string folder;
     stereo_calibration c;
