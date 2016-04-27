@@ -22,7 +22,7 @@
 #include "square.hpp"
 #include "se3.hpp"
 #include "eigen_utils.hpp"
-#include "loader.hpp"
+#include "euroc_loader.hpp"
 #include "disparity.hpp"
 #include "epiline.hpp"
 #include "gaussian.hpp"
@@ -36,11 +36,11 @@ void report(const Eigen::Affine3f& pose)
 
 int main(int argc, const char* argv[])
 {
-    auto data = loader("data/MH_01_easy/");
+    auto data = euroc::loader("data/EuRoC/MH_01_easy/");
     auto sc = data.get_calibration();
 
     unsigned int frame_skip = 1;
-    unsigned int start_offset = 1000;
+    unsigned int start_offset = 1685;
 
     auto height = sc.resolution.y();
     auto width = sc.resolution.x();

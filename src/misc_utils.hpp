@@ -34,11 +34,11 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
             }
             else if (image[0](y, x) != 0)
             {
-                h.at<float>(y, x) = std::abs(image[0](y, x));
+                h.at<float>(y, x) = std::min(255.0f, 1000 * std::abs(image[0](y, x)));
             }
         }
     }
-    cv::normalize(h, h, 255, 0, cv::NORM_INF);
+    //cv::normalize(h, h, 255, 0, cv::NORM_INF);
     cv::Mat cv_image;
     cv::merge(std::vector<cv::Mat>{h, s, v}, cv_image);
     cv::cvtColor(cv_image, cv_image, CV_HSV2RGB);

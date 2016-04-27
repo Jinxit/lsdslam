@@ -7,7 +7,7 @@
 #include "eigen_utils.hpp"
 #include "disparity.hpp"
 #include "epiline.hpp"
-#include "loader.hpp"
+#include "euroc_loader.hpp"
 
 struct keyframe
 {
@@ -25,7 +25,7 @@ struct keyframe
 class tracker
 {
 public:
-    tracker(const stereo_calibration& sc, const Eigen::Affine3f& pose,
+    tracker(const euroc::stereo_calibration& sc, const Eigen::Affine3f& pose,
             const Image& new_left, const Image& new_right);
 
     Eigen::Affine3f update(const Image& new_left, const Image& new_right, const Eigen::Affine3f& guess);
@@ -40,7 +40,7 @@ private:
     void play(const Image& new_left, const Image& new_right);
 
     Eigen::Affine3f pose;
-    stereo_calibration sc;
+    euroc::stereo_calibration sc;
     keyframe kf;
     std::vector<epiline> stereo_epilines;
     Eigen::Vector2f stereo_epipole;

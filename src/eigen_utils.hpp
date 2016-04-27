@@ -152,6 +152,13 @@ inline std::vector<sparse_gaussian> sparsify_depth(const studd::two<Image>& inve
         }
     }
 
+    auto it = std::max_element(sparse_inverse_depth.back().begin(), sparse_inverse_depth.back().end(),
+        [](const std::pair<Eigen::Vector2i, gaussian>& lhs,
+           const std::pair<Eigen::Vector2i, gaussian>& rhs) {
+            return (1.0 / lhs.second.mean) < (1.0 / rhs.second.mean);
+    });
+    std::cout << it->second.mean << std::endl;
+
     return sparse_inverse_depth;
 }
 
@@ -193,12 +200,13 @@ inline sparse_gaussian warp(sparse_gaussian sparse_inverse_depth,
         auto variance = kvp.second.variance;
 
         // pi_1^-1
+        Eigen::Vector3f p2;
         p2[0] = (x - c_x) / (f_x * inv_depth);
         p2[1] = (y - c_y) / (f_y * inv_depth);
         p2[2] = 1.0 / inv_depth;
 
         // T
-        //p2 = ksi * p2;
+        p2 = ksi * p2;
 
         if (p2[2] > 0)
         {
