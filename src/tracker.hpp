@@ -7,7 +7,7 @@
 #include "eigen_utils.hpp"
 #include "disparity.hpp"
 #include "epiline.hpp"
-#include "euroc_loader.hpp"
+#include "loader/euroc.hpp"
 
 struct keyframe
 {

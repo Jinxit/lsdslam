@@ -2,29 +2,16 @@
 
 #include <utility>
 #include <vector>
-#include <iostream>
-#include <algorithm>
 #include <array>
 
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
 
 #include "opencv2/core/core.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/imgcodecs/imgcodecs.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
-#include "opencv2/core/eigen.hpp"
-#include "opencv2/imgproc/imgproc.hpp"
 
-#include <boost/filesystem.hpp>
-#include <boost/range/iterator_range.hpp>
-
-#include <yaml-cpp/yaml.h>
-
-#include "se3.hpp"
-#include "eigen_utils.hpp"
-#include "dynamic_map.hpp"
-#include "base_loader.hpp"
+#include "../se3.hpp"
+#include "../dynamic_map.hpp"
+#include "base.hpp"
 
 namespace euroc
 {
@@ -71,8 +58,7 @@ namespace euroc
     public:
         loader(const std::string& folder);
 
-        frame operator[](size_t i);
-        stereo_calibration get_calibration() const { return c; }
+        frame operator[](size_t i) override;
 
     private:
         Eigen::Affine3f pose_at(size_t i);

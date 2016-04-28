@@ -1,12 +1,36 @@
-#include "euroc_loader.hpp"
+#include "euroc.hpp"
+
+#include <utility>
+#include <vector>
+#include <iostream>
+#include <algorithm>
+#include <array>
+
+#include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/Geometry>
+
+#include "opencv2/core/core.hpp"
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/imgcodecs/imgcodecs.hpp"
+#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/core/eigen.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+
+#include <boost/filesystem.hpp>
+#include <boost/range/iterator_range.hpp>
+
+#include <yaml-cpp/yaml.h>
+
+#include "../eigen_utils.hpp"
 
 namespace fs = boost::filesystem;
+
 namespace euroc
 {
     namespace
     {
         std::function<Image(size_t)>
-        create_image_loader(const std::string& folder, const euroc::calibration& c)
+        create_image_loader(const std::string& folder, const calibration& c)
         {
             return [&c, folder](size_t id) {
                 cv::Mat image = cv::imread(folder + std::to_string(id) + ".png",
@@ -97,9 +121,9 @@ namespace euroc
             return poses;
         }
 
-        euroc::stereo_calibration load_calibration(const std::string& folder)
+        stereo_calibration load_calibration(const std::string& folder)
         {
-            euroc::stereo_calibration output;
+            stereo_calibration output;
 
             // load calibration from file
             YAML::Node left = YAML::LoadFile(folder + "cam0/sensor.yaml");
@@ -195,10 +219,10 @@ namespace euroc
     loader::loader(const std::string& folder)
         : base_loader(load_calibration(folder)), folder(folder),
           indices(load_indices(folder)),
+          poses(load_poses(folder)),
           left_map(create_image_loader(folder + "cam0/data/", c.left)),
           right_map(create_image_loader(folder + "cam1/data/", c.right))
     {
-        poses = load_poses(folder);
         //recalibrate();
     }
 

@@ -22,7 +22,7 @@
 #include "square.hpp"
 #include "se3.hpp"
 #include "eigen_utils.hpp"
-#include "euroc_loader.hpp"
+#include "loader/euroc.hpp"
 #include "disparity.hpp"
 #include "epiline.hpp"
 #include "gaussian.hpp"
