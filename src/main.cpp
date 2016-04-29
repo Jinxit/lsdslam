@@ -26,7 +26,7 @@
 #include "disparity.hpp"
 #include "epiline.hpp"
 #include "gaussian.hpp"
-#include "tracker.hpp"
+#include "tracker/stereo.hpp"
 
 void report(const Eigen::Affine3f& pose)
 {
@@ -46,14 +46,17 @@ int main(int argc, const char* argv[])
     auto width = sc.resolution.x();
 
     auto first_frame = data[start_offset];
-    auto t = tracker(sc, first_frame.pose, first_frame.left, first_frame.right);
+    auto t = stereo::tracker(first_frame.pose, sc.resolution, [](float x) { return 1; },
+                             sc.static_fundamental, sc.transform_left_right,
+                             sc.left.intrinsic, sc.transform_left);
+
     for (size_t i = start_offset + frame_skip; i < 10000; i += frame_skip)
     {
         std::cout << "original pose:" << std::endl << t.get_pose().matrix() << std::endl;
         auto new_frame = data[i];
         auto guess = data[i - frame_skip].pose.inverse() * new_frame.pose;
         auto start = std::chrono::steady_clock::now();
-        auto travelled = t.update(new_frame.left, new_frame.right, guess);//Eigen::Affine3f(Eigen::Matrix4f::Identity()));
+        auto travelled = t.update({new_frame.left, new_frame.right}, guess);//Eigen::Affine3f(Eigen::Matrix4f::Identity()));
         auto end = std::chrono::steady_clock::now();
         auto dt = end - start;
         std::cerr << (std::chrono::duration<double, std::milli>(dt).count()) << " ms" << std::endl;
