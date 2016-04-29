@@ -1,5 +1,7 @@
 #pragma once
 
+#include "base_loader.hpp"
+
 #include <utility>
 #include <vector>
 #include <array>
@@ -11,7 +13,6 @@
 
 #include "../se3.hpp"
 #include "../dynamic_map.hpp"
-#include "base.hpp"
 
 namespace euroc
 {
