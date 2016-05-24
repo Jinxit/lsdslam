@@ -44,9 +44,9 @@ public:
         indices[k] = elements.size() - 1;
     }
 
-    typename std::vector<std::pair<Key, T>>::iterator begin() { return elements.begin(); }
+    typename std::vector<std::pair<Key, T>>::iterator begin() { invalidated = true; return elements.begin(); }
     typename std::vector<std::pair<Key, T>>::const_iterator begin() const { return elements.begin(); }
-    typename std::vector<std::pair<Key, T>>::iterator end() { return elements.end(); }
+    typename std::vector<std::pair<Key, T>>::iterator end() { invalidated = true; return elements.end(); }
     typename std::vector<std::pair<Key, T>>::const_iterator end() const { return elements.end(); }
     size_t size() const { return elements.size(); }
 

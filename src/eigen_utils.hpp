@@ -14,21 +14,24 @@
 template<int Height, int Width>
 using Matrix = Eigen::Matrix<float, Height, Width>;
 using Image = Eigen::MatrixXf;
+using Imaged = Eigen::MatrixXd;
 using sparse_gaussian = vector_map<Eigen::Vector2i, gaussian,
                                    matrix_hash<Eigen::Vector2i>>;
 
-inline Eigen::Matrix3f skewed(const Eigen::Vector3f& x)
+template<class T>
+inline Eigen::Matrix<T, 3, 3> skewed(const Eigen::Matrix<T, 3, 1>& x)
 {
-    Eigen::Matrix3f skewed;
-    skewed <<    0, -x[2],  x[1],
-              x[2],     0, -x[0],
-             -x[1],  x[0],     0;
+    Eigen::Matrix<T, 3, 3> skewed;
+    skewed << T(0), -x[2],  x[1],
+              x[2],  T(0), -x[0],
+             -x[1],  x[0],  T(0);
     return skewed;
 }
 
-inline Eigen::Vector3f unskewed(const Eigen::Matrix3f& m)
+template<class T>
+inline Eigen::Matrix<T, 3, 1> unskewed(const Eigen::Matrix<T, 3, 3>& m)
 {
-    Eigen::Vector3f unskewed;
+    Eigen::Matrix<T, 3, 1> unskewed;
     unskewed[0] = m(2, 1);
     unskewed[1] = m(0, 2);
     unskewed[2] = m(1, 0);
@@ -125,55 +128,19 @@ inline float interpolate(const Image& image, const Eigen::Vector2f& p)
          + image(ip.y() + 1, ip.x() + 1) * bottom_right;
 }
 
-
-inline std::vector<sparse_gaussian> sparsify_depth(const studd::two<Image>& inverse_depth,
-                                                   int max_pyramid = 4)
-{
-    auto height = inverse_depth[0].rows();
-    auto width = inverse_depth[0].cols();
-
-    std::vector<sparse_gaussian> sparse_inverse_depth;
-    //sparse_inverse_depth.reserve(height * width);
-    for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
-    {
-        sparse_inverse_depth.emplace_back();
-        for (int y = 0; y < height; y += pyr)
-        {
-            for (int x = 0; x < width; x += pyr)
-            {
-                auto inv_mean = inverse_depth[0](y, x);
-                auto inv_var = inverse_depth[1](y, x);
-
-                if (inv_var >= 0 && inv_mean != 0)
-                {
-                    sparse_inverse_depth.back().push_back({x, y}, gaussian(inv_mean, inv_var));
-                }
-            }
-        }
-    }
-
-    auto it = std::max_element(sparse_inverse_depth.back().begin(), sparse_inverse_depth.back().end(),
-        [](const std::pair<Eigen::Vector2i, gaussian>& lhs,
-           const std::pair<Eigen::Vector2i, gaussian>& rhs) {
-            return (1.0 / lhs.second.mean) < (1.0 / rhs.second.mean);
-    });
-    std::cout << it->second.mean << std::endl;
-
-    return sparse_inverse_depth;
-}
-
 inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_depth,
-                                       int height, int width)
+                                       int height, int width, int pyramid_level = 1)
 {
     Image inv_depth = Image::Zero(height, width);
     Image variance = Image::Constant(height, width, -1);
 
     for (const auto& kvp : sparse_inverse_depth)
     {
-        auto x = kvp.first.x();
-        auto y = kvp.first.y();
+        size_t x = kvp.first.x() / pyramid_level;
+        size_t y = kvp.first.y() / pyramid_level;
 
-        if (x >= 0 && x < width && y >= 0 && y < height)
+        if (x >= 0 && x < width && y >= 0 && y < height &&
+            inv_depth(y, x) < kvp.second.mean)
         {
             inv_depth(y, x) = kvp.second.mean;
             variance(y, x) = kvp.second.variance;
@@ -183,37 +150,63 @@ inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_dep
     return {inv_depth, variance};
 }
 
+inline sparse_gaussian sparsify_depth(const studd::two<Image>& inverse_depth, bool invert_depth = false)
+{
+    auto height = inverse_depth[0].rows();
+    auto width = inverse_depth[0].cols();
+
+    sparse_gaussian sparse_inverse_depth;
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            auto inv_mean = inverse_depth[0](y, x);
+            auto inv_var = inverse_depth[1](y, x);
+
+            if (inv_var >= 0 && inv_mean != 0)
+            {
+                sparse_inverse_depth.push_back(
+                    {x, y}, gaussian(invert_depth ? 1.0 / inv_mean : inv_mean, inv_var)
+                );
+            }
+        }
+    }
+
+    return sparse_inverse_depth;
+}
+
 inline sparse_gaussian warp(sparse_gaussian sparse_inverse_depth,
                             const Eigen::Matrix3f& intrinsic,
                             const Eigen::Affine3f& ksi)
 {
-    auto f_x = intrinsic(0, 0);
-    auto f_y = intrinsic(1, 1);
-    auto c_x = intrinsic(0, 2);
-    auto c_y = intrinsic(1, 2);
+    double f_x = intrinsic(0, 0);
+    double f_y = intrinsic(1, 1);
+    double c_x = intrinsic(0, 2);
+    double c_y = intrinsic(1, 2);
 
     for (auto& kvp : sparse_inverse_depth)
     {
-        auto x = kvp.first.x();
-        auto y = kvp.first.y();
-        auto inv_depth = kvp.second.mean;
-        auto variance = kvp.second.variance;
+        double x = kvp.first.x();
+        double y = kvp.first.y();
+        double inv_depth = kvp.second.mean;
+        double variance = kvp.second.variance;
 
         // pi_1^-1
-        Eigen::Vector3f p2;
-        p2[0] = (x - c_x) / (f_x * inv_depth);
-        p2[1] = (y - c_y) / (f_y * inv_depth);
-        p2[2] = 1.0 / inv_depth;
+        Eigen::Vector3f p2(
+            (x - c_x) / (f_x * inv_depth),
+            (y - c_y) / (f_y * inv_depth),
+            1.0 / inv_depth
+        );
 
         // T
-        p2 = ksi * p2;
 
+        p2 = ksi * p2;
         if (p2[2] > 0)
         {
             // pi_2
-            kvp.first.x() = p2[0] * f_x / p2[2] + c_x;
-            kvp.first.y() = p2[1] * f_y / p2[2] + c_y;
-            kvp.second.mean = 1.0 / p2[2];
+            kvp.first.x() = std::round(p2.x() * (f_x / p2.z()) + c_x);
+            kvp.first.y() = std::round(p2.y() * (f_y / p2.z()) + c_y);
+            kvp.second.mean = 1.0 / p2.z();
             kvp.second.variance = std::pow(inv_depth / kvp.second.mean, 4) * variance;
         }
         else
@@ -224,4 +217,21 @@ inline sparse_gaussian warp(sparse_gaussian sparse_inverse_depth,
     }
 
     return sparse_inverse_depth;
+}
+
+inline Image pyramid(const Image& src, int pyramid)
+{
+    size_t height = src.rows();
+    size_t width = src.cols();
+
+    Image resized = Image::Zero(height / pyramid, width / pyramid);
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            resized(y / pyramid, x / pyramid) += src(y, x) / studd::square(pyramid);
+        }
+    }
+
+    return resized;
 }

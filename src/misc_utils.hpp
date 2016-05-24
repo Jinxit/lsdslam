@@ -3,8 +3,10 @@
 #include "opencv2/core/core.hpp"
 #include "opencv2/highgui/highgui.hpp"
 
+#include "map_range.hpp"
+
 inline void show(const std::string& title, const Image& image, bool normalize = false,
-          float multiplier = 1.0f)
+                 float multiplier = 1.0f)
 {
     cv::Mat cv_image;
     cv::eigen2cv(image, cv_image);
@@ -12,6 +14,27 @@ inline void show(const std::string& title, const Image& image, bool normalize = 
         cv::normalize(cv_image, cv_image, 1, 0, cv::NORM_INF);
     //std::cout << "show " << image(0, 0) << " " << cv_image.at<float>(0, 0) << std::endl;
     cv::imshow(title, cv_image * multiplier);
+}
+
+inline void show_rgb(const std::string& title, const Image& r, const Image& g, const Image& b,
+                     int height, int width, bool normalize = false)
+{
+    cv::Mat cv_r, cv_g, cv_b;
+    cv::eigen2cv(r, cv_r);
+    cv::eigen2cv(g, cv_g);
+    cv::eigen2cv(b, cv_b);
+
+    if (normalize)
+    {
+        cv::normalize(cv_r, cv_r, 1, 0, cv::NORM_INF);
+        cv::normalize(cv_g, cv_g, 1, 0, cv::NORM_INF);
+        cv::normalize(cv_b, cv_b, 1, 0, cv::NORM_INF);
+    }
+
+    cv::Mat cv_image;
+    cv::merge(std::vector<cv::Mat>{0*cv_b, cv_g, cv_r}, cv_image);
+    cv::resize(cv_image, cv_image, cv::Size(width, height), 0, 0, cv::INTER_NEAREST);
+    cv::imshow(title, cv_image);
 }
 
 inline void show_rainbow(const std::string& title, const studd::two<Image>& image,
@@ -34,11 +57,12 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
             }
             else if (image[0](y, x) != 0)
             {
-                h.at<float>(y, x) = std::min(255.0f, 1000 * std::abs(image[0](y, x)));
+                //h.at<float>(y, x) = std::min(255.0f, 1000 * std::abs(image[0](y, x)));
+                h.at<float>(y, x) = std::abs(image[0](y, x));
             }
         }
     }
-    //cv::normalize(h, h, 255, 0, cv::NORM_INF);
+    cv::normalize(h, h, 255, 0, cv::NORM_INF);
     cv::Mat cv_image;
     cv::merge(std::vector<cv::Mat>{h, s, v}, cv_image);
     cv::cvtColor(cv_image, cv_image, CV_HSV2RGB);
@@ -53,6 +77,139 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
         }
     }*/
     cv::imshow(title, cv_image);
+}
+
+inline void show_residuals(const std::string& title,
+                           const Image& new_image, const Image& ref_image,
+                           const sparse_gaussian& sparse_inverse_depth,
+                           const sparse_gaussian& warped,
+                           int height, int width, int magnification = 4)
+{
+    auto pyr = new_image.rows() / height;
+
+    Image warped_image = Image::Zero(height, width);
+    Image warped_image_inv_depth = Image::Zero(height, width);
+    Image warped_image_variance = -Image::Ones(height, width);
+    Image mask = Image::Zero(height, width);
+    for (size_t j = 0; j < warped.size(); j++)
+    {
+        float x = float(warped[j].first.x()) / pyr;
+        float y = float(warped[j].first.y()) / pyr;
+        Eigen::Vector2f p(x, y);
+
+        if (x > 0 && x < width - 1 && y > 0 && y < height - 1)
+        {
+            int sx = sparse_inverse_depth[j].first.x() / pyr;
+            int sy = sparse_inverse_depth[j].first.y() / pyr;
+
+            if (sx > 0 && sx < width - 1 && sy > 0 && sy < height - 1)
+            {
+                gaussian warped_pixel = warped[j].second
+                                      ^ gaussian(interpolate(warped_image_inv_depth, p),
+                                                 interpolate(warped_image_variance, p));
+                if (warped[j].second.mean > warped_image_inv_depth(sy, sx))
+                {
+                    if (x < width && y < height)
+                        warped_image(sy, sx) = interpolate(new_image, p * pyr);
+                }
+                warped_image_inv_depth(sy, sx) = warped_pixel.mean;
+                warped_image_variance(sy, sx) = warped_pixel.variance;
+                mask(sy, sx) = 1;
+            }
+        }
+    }
+
+    Image resized_ref(height, width);
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            resized_ref(y, x) = ref_image(y * pyr, x * pyr);
+        }
+    }
+
+    Image residuals = (resized_ref - warped_image).cwiseAbs();//.cwiseProduct(mask);
+
+    cv::Mat img = cv::Mat::zeros(height * magnification, width * magnification, CV_8UC3);
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            for (int i = 0; i < magnification; i++)
+            {
+                for (int j = 0; j < magnification; j++)
+                {
+                    auto col = resized_ref(y, x);
+                    col *= 0;
+                    img.at<cv::Vec3b>(y * magnification + i, x * magnification + j)
+                        = cv::Vec3b(col * 255, col * 255, col * 255 + residuals(y, x) * 255.0);
+                }
+            }
+        }
+    }
+
+    cv::imshow(title, img);
+}
+
+
+inline void show_residuals(const std::string& title, const Eigen::Matrix3f& intrinsic, 
+                           const Image& new_image, const Image& ref_image,
+                           const sparse_gaussian& sparse_inverse_depth,
+                           const Eigen::Affine3f& transform,
+                           int height, int width, int magnification = 4)
+{
+    show_residuals(title, new_image, ref_image, sparse_inverse_depth,
+                   warp(sparse_inverse_depth, intrinsic, transform), height, width,
+                   magnification);
+
+}
+
+inline void show_jacobian(const std::string& title, const Eigen::MatrixXf& J,
+                          const std::vector<Eigen::Vector2i>& J_helper,
+                          int height, int width, float magnification)
+{
+    std::vector<float> min_J(J.cols(), 100000);
+    std::vector<float> max_J(J.cols(), -100000);
+    std::vector<float> avg_J(J.cols(), 0);
+
+    std::vector<Image> jacobian_images(J.cols(), Image::Zero(height, width));
+    std::vector<Image> masks(J.cols(), Image::Zero(height, width));
+    for (size_t i = 0; i < J.rows(); i++)
+    {
+        int x = J_helper[i].x();
+        int y = J_helper[i].y();
+
+        for (size_t j = 0; j < J.cols(); j++)
+        {
+            float Jij = J(i, j);
+            jacobian_images[j](y, x) = Jij;
+            min_J[j] = std::min(min_J[j], Jij);
+            max_J[j] = std::max(max_J[j], Jij);
+            avg_J[j] += Jij;
+            masks[j](y, x) = 1;
+        }
+    }
+    for (size_t j = 0; j < avg_J.size(); j++)
+    {
+        avg_J[j] /= J.size();
+    }
+
+    for (size_t j = 0; j < jacobian_images.size(); j++)
+    {
+        // b1 + (x - a1) * (b2 - b1) / (a2 - a1);
+        Image r = (jacobian_images[j].cwiseProduct(masks[j]).array() > 0)
+                  .select(jacobian_images[j], Image::Zero(height, width));
+        Image g = (jacobian_images[j].cwiseProduct(masks[j]).array() < 0)
+                  .select(-jacobian_images[j], Image::Zero(height, width));
+
+        show_rgb(title + std::to_string(j), r, g, masks[j],
+                 height * magnification, width * magnification, true);
+
+        //show(title + std::to_string(j), jacobian_images[j].unaryExpr(
+        //    [&](float x) { return studd::map_range(x, a1, a2, b1, b2); })
+        //    .cwiseProduct(masks[j]));
+    }
+    cv::waitKey(0);
 }
 
 /*inline void plot_errors(const se3& id,

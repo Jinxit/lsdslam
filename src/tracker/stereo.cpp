@@ -35,14 +35,17 @@ namespace stereo
         constexpr float keyframe_distance = 0.2;
         constexpr float keyframe_angle = M_PI / 8;
 
-        show_rainbow("first", kf.inverse_depth, observation[0]);
-        auto gradient = sobel(observation[0]);
-        auto s_stereo = regularize_depth(static_stereo(observation[0], observation[1], gradient));
-        show_rainbow("s_stereo", s_stereo, observation[0]);
-        auto sparse_s_stereo = sparsify_depth(s_stereo, 1)[0];
+        auto& new_left = observation[0];
+        auto& new_right = observation[1];
+
+        show_rainbow("first", kf.inverse_depth, new_left);
+        auto gradient = sobel(new_left);
+        auto s_stereo = regularize_depth(static_stereo(new_left, new_right, gradient));
+        show_rainbow("s_stereo", s_stereo, new_left);
+        auto sparse_s_stereo = sparsify_depth(s_stereo);
         
         //auto transform = photometric_tracking(sparse_s_stereo,
-        //                                      observation[0], kf.left,
+        //                                      new_left, kf.left,
         //                                      sc.left.intrinsic,
         //                                      weighting,
         //                                      guess).exp();
@@ -58,9 +61,9 @@ namespace stereo
         auto warped_s_stereo = regularize_depth(densify_depth(warp(sparse_s_stereo, left_intrinsic,
                                                                    kf_to_current),
                                                 resolution.y(), resolution.x()));
-        show_rainbow("warped_s_stereo", warped_s_stereo, observation[0]);
+        show_rainbow("warped_s_stereo", warped_s_stereo, new_left);
         kf.inverse_depth = fuse_depth(kf.inverse_depth, warped_s_stereo);
-        show_rainbow("fused_static", kf.inverse_depth, observation[0]);
+        show_rainbow("fused_static", kf.inverse_depth, new_left);
 
         if (false && (kf_to_current.translation().norm() > keyframe_distance ||
             Eigen::AngleAxisf(kf_to_current.rotation()).angle() > keyframe_angle))
@@ -69,26 +72,26 @@ namespace stereo
             std::cout << guess.translation() << std::endl;
             std::cout << "new keyframe" << std::endl;
             // initialize keyframe
-            kf.inverse_depth = regularize_depth(densify_depth(warp(sparsify_depth(kf.inverse_depth, 1)[0],
+            kf.inverse_depth = regularize_depth(densify_depth(warp(sparsify_depth(kf.inverse_depth),
                                                                    left_intrinsic, kf_to_current),
                                                               resolution.y(), resolution.x()));
             kf.pose = pose;
-            kf.intensity = observation[0];
+            kf.intensity = new_left;
         }
         else
         {
             // TODO: this might need some warping OR just reversing new/ref
-            //auto t_stereo = temporal_stereo(observation[0], kf.left, gradient, transform);
-            //show_rainbow("t_stereo", t_stereo, observation[0]);
+            //auto t_stereo = temporal_stereo(new_left, kf.left, gradient, transform);
+            //show_rainbow("t_stereo", t_stereo, new_left);
             //kf.inverse_depth = fuse_depth(kf.inverse_depth, t_stereo);
-            //show_rainbow("fused_temporal_static", kf.inverse_depth, observation[0]);
+            //show_rainbow("fused_temporal_static", kf.inverse_depth, new_left);
             //cv::waitKey(0);
             //cv::destroyWindow("fused_temporal_static");
             kf.inverse_depth = regularize_depth(kf.inverse_depth);
-            show_rainbow("regularized", kf.inverse_depth, observation[0]);
+            show_rainbow("regularized", kf.inverse_depth, new_left);
             cv::waitKey(0);
         }
-        //play(observation[0], observation[1]);
+        //play(new_left, new_right);
 
         return transform;
     }
