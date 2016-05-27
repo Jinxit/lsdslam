@@ -11,8 +11,6 @@
 #include "vector_map.hpp"
 #include "matrix_hash.hpp"
 
-template<int Height, int Width>
-using Matrix = Eigen::Matrix<float, Height, Width>;
 using Image = Eigen::MatrixXf;
 using Imaged = Eigen::MatrixXd;
 using sparse_gaussian = vector_map<Eigen::Vector2i, gaussian,

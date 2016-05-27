@@ -13,11 +13,11 @@
 #include "ceres/cubic_interpolation.h"
 
 // Odometry from RGB-D Cameras for Autonomous Quadrocopters (eq 4.22 onwards)
-inline Matrix<1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
-                                        float x, float y, float inv_depth,
-                                        const Eigen::Matrix3f& intrinsic)
+inline Eigen::Matrix<float, 1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
+                                                      float x, float y, float inv_depth,
+                                                      const Eigen::Matrix3f& intrinsic)
 {
-    Matrix<1, 2> J_I;
+    Eigen::Matrix<float, 1, 2> J_I;
     J_I(0, 0) = gradient[0](y, x);
     J_I(0, 1) = gradient[1](y, x);
 
@@ -25,13 +25,13 @@ inline Matrix<1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
 //    J_I_(0, 0) = gradient[0](y, x) * intrinsic(0, 0);
 //    J_I_(0, 1) = gradient[1](y, x) * intrinsic(1, 1);
 
-    Matrix<2, 3> J_pi = Matrix<2, 3>::Zero();
+    Eigen::Matrix<float, 2, 3> J_pi = Eigen::Matrix<float, 2, 3>::Zero();
     J_pi(0, 0) =  intrinsic(0, 0) * inv_depth;
     J_pi(1, 1) =  intrinsic(1, 1) * inv_depth;
     J_pi(0, 2) = -intrinsic(0, 0) * x * studd::square(inv_depth);
     J_pi(1, 2) = -intrinsic(1, 1) * y * studd::square(inv_depth);
 
-    Matrix<3, 12> J_g = Matrix<3, 12>::Zero();
+    Eigen::Matrix<float, 3, 12> J_g = Eigen::Matrix<float, 3, 12>::Zero();
     for (int i = 0; i < 3; i++)
     {
         J_g(i, i    ) = x;
@@ -40,7 +40,7 @@ inline Matrix<1, 6> image_pose_jacobian(const studd::two<Image>& gradient,
         J_g(i, i + 9) = 1;
     }
 
-    Matrix<12, 6> J_G = Matrix<12, 6>::Zero();
+    Eigen::Matrix<float, 12, 6> J_G = Eigen::Matrix<float, 12, 6>::Zero();
     J_G(1,  5) =  1;
     J_G(2,  4) = -1;
     J_G(3,  5) = -1;
