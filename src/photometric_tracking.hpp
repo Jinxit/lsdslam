@@ -103,30 +103,26 @@ struct warp_error
           x(x), y(y), inv_depth(inv_depth) { }
 
     template<class T>
-    bool operator()(const T* const ksi_, T* residuals) const
+    bool operator()(const T* const ksi, T* residuals) const
     {
-        se3<T> ksi(ksi_[0], ksi_[1], ksi_[2], ksi_[3], ksi_[4], ksi_[5]);
-
         Eigen::Matrix<T, 3, 1> p2(
-            T((x - c_x) / (f_x * inv_depth)),
-            T((y - c_y) / (f_y * inv_depth)),
+            T((x - c_x + 0.5f) / (f_x * inv_depth)),
+            T((y - c_y + 0.5f) / (f_y * inv_depth)),
             T(1.0 / inv_depth)
         );
 
-        p2 = ksi.exp() * p2;
+        p2 = se3<T>(ksi).exp() * p2;
 
-        T new_intensity;
-        T ref_intensity;
-        T drop;
+        T x2 = p2.x() * (T(f_x) / p2.z()) + T(c_x);
+        T y2 = p2.y() * (T(f_y) / p2.z()) + T(c_y);
 
         using Grid = ceres::Grid2D<float, 1, false, false>;
-        Grid new_grid(ref_image->data(), 0, new_image->rows(), 0, new_image->cols());
-        Grid ref_grid(ref_image->data(), 0, ref_image->rows(), 0, ref_image->cols());
+        Grid new_grid(new_image->data(), 0, new_image->rows(), 0, new_image->cols());
         ceres::BiCubicInterpolator<Grid> new_interp(new_grid);
-        ceres::BiCubicInterpolator<Grid> ref_interp(ref_grid);
 
-        new_interp.Evaluate(p2.y(), p2.x(), &new_intensity);
-        ref_interp.Evaluate(T(y), T(x), &ref_intensity);
+        T new_intensity;
+        new_interp.Evaluate(y2, x2, &new_intensity);
+        T ref_intensity = T((*ref_image)(int(y), int(x)));
         residuals[0] = T(ref_intensity - new_intensity);
         return true;
     }
@@ -162,8 +158,8 @@ inline se3<float> ceres_tracking(const sparse_gaussian& sparse_inverse_depth,
     auto width = new_image.cols();
 
     se3<float> min_ksi = guess;
-    double ksi_[6] = {min_ksi.omega[0], min_ksi.omega[1], min_ksi.omega[2],
-                      min_ksi.nu[0], min_ksi.nu[1], min_ksi.nu[2]};
+    double ksi[6] = {min_ksi.omega[0], min_ksi.omega[1], min_ksi.omega[2],
+                     min_ksi.nu[0], min_ksi.nu[1], min_ksi.nu[2]};
 
     int pyr_i = -1;
     for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
@@ -177,25 +173,30 @@ inline se3<float> ceres_tracking(const sparse_gaussian& sparse_inverse_depth,
         auto new_resized = pyramid(new_image, pyr);
 
         ceres::Problem problem;
-        for (size_t i = 0; i < sparse_inverse_depth.size(); i++)
+        for (size_t i = 0; i < sparse_inverse_depth.size(); i += pyr)
         {
             auto cost_func = warp_error::create(pyramid_intrinsic,
                                                 &new_resized,
                                                 &ref_resized,
-                                                sparse_inverse_depth[i].first.x(),
-                                                sparse_inverse_depth[i].first.y(),
+                                                sparse_inverse_depth[i].first.x() / pyr,
+                                                sparse_inverse_depth[i].first.y() / pyr,
                                                 sparse_inverse_depth[i].second.mean);
-            problem.AddResidualBlock(cost_func, NULL, ksi_);
+            problem.AddResidualBlock(cost_func, NULL, ksi);
         }
 
         ceres::Solver::Options options;
         options.linear_solver_type = ceres::DENSE_QR;
         options.minimizer_progress_to_stdout = true;
+        options.num_threads = 4;
         ceres::Solver::Summary summary;
         ceres::Solve(options, &problem, &summary);
 
         std::cout << summary.FullReport() << std::endl;
-        min_ksi = se3<float>(ksi_[0], ksi_[1], ksi_[2], ksi_[3], ksi_[4], ksi_[5]);
+        min_ksi = se3<float>(ksi[0], ksi[1], ksi[2], ksi[3], ksi[4], ksi[5]);
+        show_residuals("progress", intrinsic, new_image, ref_image, sparse_inverse_depth,
+                       min_ksi.exp(), new_image.rows() / pyr,
+                       new_image.cols() / pyr, 2 * pyr);
+        //cv::waitKey(0);
     }
 
     std::cout << "min pose:" << std::endl << min_ksi.exp().matrix() << std::endl;

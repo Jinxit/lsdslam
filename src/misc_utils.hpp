@@ -128,7 +128,7 @@ inline void show_residuals(const std::string& title,
         }
     }
 
-    Image residuals = (resized_ref - warped_image).cwiseAbs();//.cwiseProduct(mask);
+    Image residuals = (resized_ref - warped_image).cwiseAbs().cwiseProduct(mask);
 
     cv::Mat img = cv::Mat::zeros(height * magnification, width * magnification, CV_8UC3);
     for (int y = 0; y < height; y++)
@@ -152,7 +152,7 @@ inline void show_residuals(const std::string& title,
 }
 
 
-inline void show_residuals(const std::string& title, const Eigen::Matrix3f& intrinsic, 
+inline void show_residuals(const std::string& title, const Eigen::Matrix3f& intrinsic,
                            const Image& new_image, const Image& ref_image,
                            const sparse_gaussian& sparse_inverse_depth,
                            const Eigen::Affine3f& transform,

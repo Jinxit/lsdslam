@@ -224,7 +224,7 @@ inline Image pyramid(const Image& src, int pyramid)
     size_t height = src.rows();
     size_t width = src.cols();
 
-    Image resized = Image::Zero(height / pyramid, width / pyramid);
+    Image resized = Image::Zero(height / pyramid + 1, width / pyramid + 1);
     for (int y = 0; y < height; y++)
     {
         for (int x = 0; x < width; x++)

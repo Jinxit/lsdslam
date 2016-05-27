@@ -159,7 +159,7 @@ namespace depth
                                               intrinsic,
                                               weighting,
                                               current_to_kf_before,
-                                              4).exp();
+                                              32).exp();
         show_residuals("minimized", intrinsic, new_intensity, kf.intensity, sparse_depth,
                        transform, resolution.y(), resolution.x(), 2);
         std::cout << "debug: " << std::endl;

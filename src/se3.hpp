@@ -18,6 +18,7 @@ struct se3
         : omega(m.template topLeftCorner<3, 1>()), nu(m.template topRightCorner<3, 1>()) { }
     se3(T omega_x, T omega_y, T omega_z, T nu_x, T nu_y, T nu_z)
         : omega({omega_x, omega_y, omega_z}), nu({nu_x, nu_y, nu_z}) { }
+    se3(const T* const m) : omega(m[0], m[1], m[2]), nu(m[3], m[4], m[5]) { };
     se3(const Affine& noncanonical)
     {
         Eigen::Matrix<T, 4, 4> logged = noncanonical.matrix().log();
