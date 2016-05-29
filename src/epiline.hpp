@@ -5,6 +5,8 @@
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
 
+#include <sophus/se3.hpp>
+
 #include "eigen_utils.hpp"
 #include "square.hpp"
 
@@ -46,7 +48,7 @@ inline std::vector<epiline> generate_epilines(int height, int width,
     return epilines;
 }
 
-inline Eigen::Vector2f generate_epipole(const Eigen::Affine3f& transform,
+inline Eigen::Vector2f generate_epipole(const Sophus::SE3f& transform,
                                         const Eigen::Matrix3f new_intrinsic)
 {
     Eigen::Vector3f homogenous = new_intrinsic * transform.translation();

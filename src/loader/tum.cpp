@@ -75,7 +75,7 @@ namespace tum
             };
         }
 
-        bool timestamp_search(const std::pair<double, Eigen::Affine3f>& pose, double i)
+        bool timestamp_search(const std::pair<double, Sophus::SE3f>& pose, double i)
         {
             return pose.first < i;
         }
@@ -99,12 +99,12 @@ namespace tum
             return output;
         }
 
-        std::vector<std::pair<double, Eigen::Affine3f>> load_poses(const std::string& folder)
+        std::vector<std::pair<double, Sophus::SE3f>> load_poses(const std::string& folder)
         {
             std::ifstream pose_stream(folder + "groundtruth.txt");
 
             std::string line;
-            std::vector<std::pair<double, Eigen::Affine3f>> poses;
+            std::vector<std::pair<double, Sophus::SE3f>> poses;
 
             // eat the first three lines, hacky
             std::getline(pose_stream, line);
@@ -123,9 +123,9 @@ namespace tum
                 Eigen::Quaternionf rot;
                 line_stream >> rot.x() >> rot.y() >> rot.z() >> rot.w();
 
-                Eigen::Affine3f pose;
-                pose = rot;
-                pose.pretranslate(pos);
+                Sophus::SE3f pose;
+                pose.translation() = pos;
+                pose.setQuaternion(rot);
                 poses.emplace_back(timestamp, pose);
             }
             return poses;
@@ -168,7 +168,7 @@ namespace tum
     }
 
 
-    Eigen::Affine3f loader::pose_at(const std::string& i_str)
+    Sophus::SE3f loader::pose_at(const std::string& i_str)
     {
         double i = std::stod(i_str);
         auto it_after = std::lower_bound(poses.begin(), poses.end(),

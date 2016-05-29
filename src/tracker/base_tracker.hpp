@@ -3,6 +3,8 @@
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
 
+#include <sophus/se3.hpp>
+
 #include "../two.hpp"
 #include "../eigen_utils.hpp"
 #include "../disparity.hpp"
@@ -10,7 +12,7 @@
 
 struct keyframe
 {
-    keyframe(int height, int width, const Eigen::Affine3f& pose)
+    keyframe(int height, int width, const Sophus::SE3f& pose)
         : intensity(Image::Constant(height, width, 0)),
           inverse_depth(Image::Constant(height, width, 0),
                         Image::Constant(height, width, -1)),
@@ -19,33 +21,32 @@ struct keyframe
 
     Image intensity;
     studd::two<Image> inverse_depth;
-    Eigen::Affine3f pose;
+    Sophus::SE3f pose;
 };
 
 template<class Observation>
 class base_tracker
 {
 public:
-    base_tracker(const Eigen::Affine3f& pose, const Eigen::Vector2i& resolution,
+    base_tracker(const Sophus::SE3f& pose, const Eigen::Vector2i& resolution,
                  const std::function<float(float)>& weighting)
         : pose(pose),
           resolution(resolution),
           kf(resolution.y(), resolution.x(), pose),
           weighting(weighting)
-    {
-    }
+    { }
 
-    virtual Eigen::Affine3f update(const Observation& o, const Eigen::Affine3f& guess) = 0;
-    Eigen::Affine3f get_pose() const { return pose; }
+    virtual Sophus::SE3f update(const Observation& o, const Sophus::SE3f& guess) = 0;
+    Sophus::SE3f get_pose() const { return pose; }
 
 protected:
     studd::two<Image> temporal_stereo(const Image& new_image, const Image& ref_image,
                                       const studd::two<Image>& gradient,
-                                      const Eigen::Affine3f& transform,
+                                      const Sophus::SE3f& transform,
                                       const Eigen::Matrix3f& intrinsic)
     {
         // TODO: this is def not working
-        int height = resolution.y();
+        /*int height = resolution.y();
         int width = resolution.x();
 
         auto fundamental = fundamental_from_transform(transform, intrinsic);
@@ -84,7 +85,8 @@ protected:
             }
         }
 
-        return disparity;
+        return disparity;*/
+        return studd::two<Image>();
     }
 
     studd::two<Image> regularize_depth(const studd::two<Image>& inverse_depth)
@@ -159,14 +161,15 @@ protected:
         return output;
     }
 
-    Eigen::Matrix3f fundamental_from_transform(const Eigen::Affine3f& transform,
+    Eigen::Matrix3f fundamental_from_transform(const Sophus::SE3f& transform,
                                                const Eigen::Matrix3f& intrinsic)
     {
-        Eigen::Vector3f e = intrinsic * transform.rotation().transpose() * transform.translation();
-        return intrinsic.transpose().inverse() * transform.rotation() * skewed(e);
+        Eigen::Vector3f e = intrinsic * transform.rotationMatrix().transpose()
+                                      * transform.translation();
+        return intrinsic.transpose().inverse() * transform.rotationMatrix() * skewed(e);
     }
 
-    Eigen::Affine3f pose;
+    Sophus::SE3f pose;
     Eigen::Vector2i resolution;
     keyframe kf;
     std::function<float(float)> weighting;

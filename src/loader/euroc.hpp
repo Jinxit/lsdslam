@@ -11,7 +11,6 @@
 
 #include "opencv2/core/core.hpp"
 
-#include "../se3.hpp"
 #include "../dynamic_map.hpp"
 
 namespace euroc

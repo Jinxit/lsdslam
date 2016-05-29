@@ -5,6 +5,8 @@
 
 #include <eigen3/Eigen/Dense>
 
+#include <sophus/se3.hpp>
+
 #include "two.hpp"
 #include "square.hpp"
 #include "gaussian.hpp"
@@ -83,7 +85,8 @@ inline studd::two<Image> sobel(const Image& image)
 }
 
 template<class ImageMatrix>
-ImageMatrix max_pool(const Eigen::MatrixBase<ImageMatrix>& image, const Eigen::Vector2i& stride)
+ImageMatrix max_pool(const Eigen::MatrixBase<ImageMatrix>& image,
+                     const Eigen::Vector2i& stride)
 {
     int sx = stride.x();
     int sy = stride.y();
@@ -100,12 +103,11 @@ ImageMatrix max_pool(const Eigen::MatrixBase<ImageMatrix>& image, const Eigen::V
     return output;
 }
 
-inline Eigen::Affine3f interpolate(const Eigen::Affine3f lhs, const Eigen::Affine3f rhs,float t)
+inline Sophus::SE3f interpolate(const Sophus::SE3f& lhs, const Sophus::SE3f& rhs, float t)
 {
-    Eigen::Affine3f result;
-    result.matrix().topLeftCorner<3, 3>() = Eigen::Quaternionf(lhs.rotation().matrix())
-                                            .slerp(t, Eigen::Quaternionf(rhs.rotation()))
-                                            .matrix();
+    Sophus::SE3f result;
+    result.setQuaternion(Eigen::Quaternionf(lhs.rotationMatrix())
+                         .slerp(t, Eigen::Quaternionf(rhs.rotationMatrix())));
     result.translation() = (1 - t) * lhs.translation() + t * rhs.translation();
     return result;
 }
@@ -137,7 +139,7 @@ inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_dep
         size_t x = kvp.first.x() / pyramid_level;
         size_t y = kvp.first.y() / pyramid_level;
 
-        if (x >= 0 && x < width && y >= 0 && y < height &&
+        if (x < width && y < height &&
             inv_depth(y, x) < kvp.second.mean)
         {
             inv_depth(y, x) = kvp.second.mean;
@@ -148,7 +150,8 @@ inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_dep
     return {inv_depth, variance};
 }
 
-inline sparse_gaussian sparsify_depth(const studd::two<Image>& inverse_depth, bool invert_depth = false)
+inline sparse_gaussian sparsify_depth(const studd::two<Image>& inverse_depth,
+                                      bool invert_depth = false)
 {
     auto height = inverse_depth[0].rows();
     auto width = inverse_depth[0].cols();
@@ -175,7 +178,7 @@ inline sparse_gaussian sparsify_depth(const studd::two<Image>& inverse_depth, bo
 
 inline sparse_gaussian warp(sparse_gaussian sparse_inverse_depth,
                             const Eigen::Matrix3f& intrinsic,
-                            const Eigen::Affine3f& ksi)
+                            const Sophus::SE3f& ksi)
 {
     double f_x = intrinsic(0, 0);
     double f_y = intrinsic(1, 1);

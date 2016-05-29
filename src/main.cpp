@@ -18,11 +18,12 @@
 #include "opencv2/features2d/features2d.hpp"
 #include "opencv2/core/eigen.hpp"
 
+#include <sophus/se3.hpp>
+
 #include "glog/logging.h"
 
 #include "two.hpp"
 #include "square.hpp"
-#include "se3.hpp"
 #include "eigen_utils.hpp"
 #include "loader/euroc.hpp"
 #include "loader/tum.hpp"
@@ -49,7 +50,7 @@ int main(int argc, const char* argv[])
 {
     google::InitGoogleLogging(argv[0]);
 
-    auto data = tum::loader("data/TUM/freiburg2_rpy/");
+    auto data = tum::loader("data/TUM/freiburg2_xyz/");
     auto sc = data.get_calibration();
 
     unsigned int frame_skip = 3;
@@ -68,7 +69,7 @@ int main(int argc, const char* argv[])
         auto new_frame = data[i];
         auto guess = data[i - frame_skip].pose.inverse() * new_frame.pose;
         auto start = std::chrono::steady_clock::now();
-        auto travelled = t.update({new_frame.intensity, new_frame.depth}, guess);//Eigen::Affine3f(Eigen::Matrix4f::Identity()));
+        auto travelled = t.update({new_frame.intensity, new_frame.depth}, guess);
         auto end = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration<double, std::milli>(end - start).count();
         //std::cerr << ms << " ms" << std::endl;

@@ -9,9 +9,9 @@
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
 
-#include "../se3.hpp"
 #include "../dynamic_map.hpp"
 #include "../two.hpp"
+#include "../eigen_utils.hpp"
 
 namespace tum
 {
@@ -19,7 +19,7 @@ namespace tum
     {
         Image intensity;
         Image depth;
-        Eigen::Affine3f pose;
+        Sophus::SE3f pose;
     };
 
     struct calibration
@@ -36,11 +36,11 @@ namespace tum
         frame operator[](size_t i) override;
 
     private:
-        Eigen::Affine3f pose_at(const std::string& i);
+        Sophus::SE3f pose_at(const std::string& i);
 
         std::string folder;
         std::vector<studd::two<std::string>> indices;
-        std::vector<std::pair<double, Eigen::Affine3f>> poses;
+        std::vector<std::pair<double, Sophus::SE3f>> poses;
         studd::dynamic_map<std::string, Image> intensity_map;
         studd::dynamic_map<std::string, Image> depth_map;
     };

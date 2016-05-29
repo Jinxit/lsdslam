@@ -4,7 +4,6 @@
 #include "opencv2/highgui/highgui.hpp"
 
 #include "../gaussian.hpp"
-#include "../se3.hpp"
 #include "../two.hpp"
 #include "../photometric_tracking.hpp"
 #include "../square.hpp"

@@ -3,112 +3,17 @@
 #include "opencv2/core/core.hpp"
 #include "opencv2/highgui/highgui.hpp"
 
+#include <sophus/se3.hpp>
+
 #include "../gaussian.hpp"
-#include "../se3.hpp"
 #include "../two.hpp"
 #include "../photometric_tracking.hpp"
 #include "../square.hpp"
 #include "../misc_utils.hpp"
 
-
-inline void play(const sparse_gaussian& sparse_inverse_depth,
-                 const Image& new_image, const Image& ref_image,
-                 const Eigen::Matrix3f& intrinsic, int pyr = 1)
-{
-    int height = new_image.rows();
-    int width = new_image.cols();
-    se3<float> tf;
-
-    while (true)
-    {
-        int key = cvWaitKey(0);
-        if (key == 1113938) // up
-        {
-            tf.nu.y() += 0.001;
-        }
-        if (key == 1113940) // down
-        {
-            tf.nu.y() -= 0.001;
-        }
-        if (key == 1113937) // left
-        {
-            tf.nu.x() += 0.001;
-        }
-        if (key == 1113939) // right
-        {
-            tf.nu.x() -= 0.001;
-        }
-        if (key == 1048689) // Q
-        {
-            tf.omega.x() += 0.001;
-        }
-        if (key == 1048673) // A
-        {
-            tf.omega.x() -= 0.001;
-        }
-        if (key == 1048695) // W
-        {
-            tf.omega.y() += 0.001;
-        }
-        if (key == 1048691) // S
-        {
-            tf.omega.y() -= 0.001;
-        }
-        if (key == 1048677) // E
-        {
-            tf.omega.z() += 0.001;
-        }
-        if (key == 1048676) // D
-        {
-            tf.omega.z() -= 0.001;
-        }
-        //std::cout << tf << std::endl;
-
-        auto warped = warp(sparse_inverse_depth, intrinsic, tf.exp());
-
-        Image warped_image = Image::Zero(height, width);
-        Image warped_image_inv_depth = Image::Zero(height, width);
-        Image warped_image_variance = -Image::Ones(height / pyr, width / pyr);
-        Image mask = Image::Zero(height, width);
-        for (size_t j = 0; j < warped.size(); j++)
-        {
-            float x = float(warped[j].first.x()) / pyr;
-            float y = float(warped[j].first.y()) / pyr;
-            Eigen::Vector2f p(x, y);
-
-            if (x > 0 && x < width / pyr - 1 && y > 0 && y < height / pyr - 1)
-            {
-                int sx = sparse_inverse_depth[j].first.x() / pyr;
-                int sy = sparse_inverse_depth[j].first.y() / pyr;
-
-                if (sx > 0 && sx < width / pyr - 1 && sy > 0 && sy < height / pyr - 1)
-                {
-                    gaussian warped_pixel = warped[j].second
-                                          ^ gaussian(interpolate(warped_image_inv_depth, p),
-                                                     interpolate(warped_image_variance, p));
-                    if (warped[j].second.mean > warped_image_inv_depth(sy, sx))
-                    {
-                        if (x * pyr < width && y * pyr < height)
-                            warped_image(sy, sx) = interpolate(new_image, p * pyr);
-                    }
-                    warped_image_inv_depth(sy, sx) = warped_pixel.mean;
-                    warped_image_variance(sy, sx) = warped_pixel.variance;
-                    mask(sy, sx) = 1;
-                }
-            }
-        }
-
-        show("warped", warped_image);
-
-        show_residuals("warped_residual", intrinsic, new_image, ref_image,
-                       sparse_inverse_depth, tf.exp(), height, width, 4);
-    }
-}
-
-
 namespace depth
 {
-    tracker::tracker(const Eigen::Affine3f& pose,
+    tracker::tracker(const Sophus::SE3f& pose,
                      const Eigen::Vector2i& resolution,
                      const std::function<float(float)>& weighting,
                      const Eigen::Matrix3f& intrinsic,
@@ -137,7 +42,7 @@ namespace depth
         return depth;
     }
 
-    Eigen::Affine3f tracker::update(const studd::two<Image>& observation, const Eigen::Affine3f& guess)
+    Sophus::SE3f tracker::update(const studd::two<Image>& observation, const Sophus::SE3f& guess)
     {
         constexpr float keyframe_distance = 0.2;
         constexpr float keyframe_angle = M_PI / 8;
@@ -154,12 +59,13 @@ namespace depth
 
         auto current_to_kf_before = kf.pose.inverse() * pose;
         auto uh = kf.pose.inverse() * pose * guess;
-        auto transform = ceres_tracking(sparse_depth,
-                                              new_intensity, kf.intensity,
-                                              intrinsic,
-                                              weighting,
-                                              current_to_kf_before,
-                                              32).exp();
+        Sophus::SE3f transform = photometric_tracking<Sophus::SE3Group>(
+            sparse_depth,
+            new_intensity, kf.intensity,
+            intrinsic,
+            weighting,
+            current_to_kf_before,
+            32);
         show_residuals("minimized", intrinsic, new_intensity, kf.intensity, sparse_depth,
                        transform, resolution.y(), resolution.x(), 2);
         std::cout << "debug: " << std::endl;
@@ -167,7 +73,7 @@ namespace depth
         std::cout << transform.matrix() << std::endl;
         transform = guess;
         pose = pose * transform;
-        Eigen::Affine3f current_to_kf = kf.pose.inverse() * pose;
+        Sophus::SE3f current_to_kf = kf.pose.inverse() * pose;
         show_residuals("theoretical", intrinsic, new_intensity, kf.intensity, sparse_depth,
                        current_to_kf.inverse(), resolution.y(), resolution.x(), 2);
         show_residuals("starting point", intrinsic, new_intensity, kf.intensity, sparse_depth,

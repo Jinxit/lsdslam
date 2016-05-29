@@ -143,7 +143,7 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
         Eigen::Vector2f p0, p1;
         std::tie(p0, p1) = epiline_limits(epi.line, height, width);
 
-        std::array<float, num_epiline_samples> target{0};
+        std::array<float, num_epiline_samples> target{{0}};
         auto p = p0;
         Eigen::Vector2f dp = (p1 - p0).normalized() * epiline_sample_distance;
 
@@ -269,7 +269,7 @@ inline studd::two<Image> disparity_rectified(const Image& new_image, const Image
             }
 
             // set up target values;
-            std::array<float, num_epiline_samples> target{0};
+            std::array<float, num_epiline_samples> target{{0}};
             for (int i = 0; i < int(num_epiline_samples); i++)
             {
                 Eigen::Vector2f point = Eigen::Vector2f(xo + epiline_sample_distance
