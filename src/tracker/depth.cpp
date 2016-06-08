@@ -15,11 +15,9 @@ namespace depth
 {
     tracker::tracker(const Sophus::SE3f& pose,
                      const Eigen::Vector2i& resolution,
-                     const std::function<float(float)>& weighting,
                      const Eigen::Matrix3f& intrinsic,
                      const studd::two<Image>& observation)
-        : base_tracker(pose, resolution, weighting),
-          intrinsic(intrinsic)
+        : base_tracker(pose, resolution), intrinsic(intrinsic)
     {
         kf.intensity = observation[0];
         kf.inverse_depth =

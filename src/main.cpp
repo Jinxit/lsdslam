@@ -39,13 +39,6 @@ void report(const Eigen::Affine3f& pose)
               << " degrees and " << pose.translation().norm() << "m" << std::endl;
 }
 
-std::function<float(float)> gaussian_weighting(float stddev)
-{
-    return [stddev](float x) {
-        return 1.0 / stddev;
-    };
-}
-
 int main(int argc, const char* argv[])
 {
     google::InitGoogleLogging(argv[0]);
@@ -60,7 +53,7 @@ int main(int argc, const char* argv[])
     //auto t = stereo::tracker(first_frame.pose, sc.resolution, [](float x) { return 1; },
     //                         sc.static_fundamental, sc.transform_left_right,
     //                         sc.left.intrinsic, sc.transform_left);
-    auto t = depth::tracker(first_frame.pose, sc.resolution, gaussian_weighting(1e-1), sc.intrinsic,
+    auto t = depth::tracker(first_frame.pose, sc.resolution, sc.intrinsic,
                             {first_frame.intensity, first_frame.depth});
 
     for (size_t i = start_offset + frame_skip; i < 10000; i += frame_skip)

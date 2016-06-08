@@ -18,7 +18,6 @@ namespace depth
     public:
         tracker(const Sophus::SE3f& pose,
                 const Eigen::Vector2i& resolution,
-                const std::function<float(float)>& weighting,
                 const Eigen::Matrix3f& intrinsic,
                 const studd::two<Image>& observation);
 

@@ -28,12 +28,10 @@ template<class Observation>
 class base_tracker
 {
 public:
-    base_tracker(const Sophus::SE3f& pose, const Eigen::Vector2i& resolution,
-                 const std::function<float(float)>& weighting)
+    base_tracker(const Sophus::SE3f& pose, const Eigen::Vector2i& resolution)
         : pose(pose),
           resolution(resolution),
-          kf(resolution.y(), resolution.x(), pose),
-          weighting(weighting)
+          kf(resolution.y(), resolution.x(), pose)
     { }
 
     virtual Sophus::SE3f update(const Observation& o, const Sophus::SE3f& guess) = 0;
@@ -179,5 +177,4 @@ protected:
     Sophus::SE3f pose;
     Eigen::Vector2i resolution;
     keyframe kf;
-    std::function<float(float)> weighting;
 };
