@@ -128,6 +128,12 @@ inline float interpolate(const Image& image, const Eigen::Vector2f& p)
          + image(ip.y() + 1, ip.x() + 1) * bottom_right;
 }
 
+template<class T>
+inline T interpolate(T lhs, T rhs, float t)
+{
+    return (1.0f - t) * lhs + t * rhs;
+}
+
 inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_depth,
                                        int height, int width, int pyramid_level = 1)
 {
@@ -192,16 +198,13 @@ inline sparse_gaussian warp(sparse_gaussian sparse_inverse_depth,
         double inv_depth = kvp.second.mean;
         double variance = kvp.second.variance;
 
-        // pi_1^-1
-        Eigen::Vector3f p2(
-            (x - c_x) / (f_x * inv_depth),
-            (y - c_y) / (f_y * inv_depth),
+        // T * pi_1^-1
+        Eigen::Vector3f p2 = ksi * Eigen::Vector3f(
+            (x - c_x + 0.5f) / (f_x * inv_depth),
+            (y - c_y + 0.5f) / (f_y * inv_depth),
             1.0 / inv_depth
         );
 
-        // T
-
-        p2 = ksi * p2;
         if (p2[2] > 0)
         {
             // pi_2

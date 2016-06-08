@@ -152,10 +152,17 @@ protected:
         {
             for (int x = 0; x < lhs[0].cols(); x++)
             {
-                auto fused = gaussian(lhs[0](y, x), lhs[1](y, x))
-                           ^ gaussian(rhs[0](y, x), rhs[1](y, x));
-                output[0](y, x) = fused.mean;
-                output[1](y, x) = fused.variance;
+                if (lhs[1](y, x) > 0)
+                {
+                    auto fused = gaussian(lhs[0](y, x), lhs[1](y, x))
+                               ^ gaussian(rhs[0](y, x), rhs[1](y, x));
+                    output[0](y, x) = fused.mean;
+                    output[1](y, x) = fused.variance;
+                }
+                else
+                {
+                    output[1](y, x) = -1;
+                }
             }
         }
         return output;

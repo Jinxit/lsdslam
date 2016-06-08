@@ -46,6 +46,10 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
     cv::Mat h = cv::Mat::zeros(height, width, CV_32F);;
     cv::Mat s = cv::Mat::ones(height, width, CV_32F);
     cv::Mat v = cv::Mat::ones(height, width, CV_32F);
+
+    cv::Mat r = cv::Mat::zeros(height, width, CV_32F);
+    cv::Mat g = cv::Mat::zeros(height, width, CV_32F);
+    cv::Mat b = cv::Mat::zeros(height, width, CV_32F);
     for (int y = 0; y < height; y++)
     {
         for (int x = 0; x < width; x++)
@@ -57,26 +61,25 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
             }
             else if (image[0](y, x) != 0)
             {
-                //h.at<float>(y, x) = std::min(255.0f, 1000 * std::abs(image[0](y, x)));
                 h.at<float>(y, x) = std::abs(image[0](y, x));
+            }
+            if (image[1](y, x) > 0)
+            {
+                r.at<float>(y, x) = interpolate<float>(0, 1, image[1](y, x));
+                g.at<float>(y, x) = 1.0f - r.at<float>(y, x);
             }
         }
     }
     cv::normalize(h, h, 255, 0, cv::NORM_INF);
-    cv::Mat cv_image;
-    cv::merge(std::vector<cv::Mat>{h, s, v}, cv_image);
-    cv::cvtColor(cv_image, cv_image, CV_HSV2RGB);
-    /*for (int y = 0; y < height; y++)
-    {
-        for (int x = 0; x < width; x++)
-        {
-            if (image[1](y, x) < 0 || x < 5 || x > width - 5 || y < 5 || y > height - 5)
-            {
-                cv_image.at<cv::Vec3f>(y, x) = cv::Vec3f(image[0](y, x), image[0](y, x), image[0](y, x));
-            }
-        }
-    }*/
-    cv::imshow(title, cv_image);
+    cv::Mat rainbow_image;
+    cv::merge(std::vector<cv::Mat>{h, s, v}, rainbow_image);
+    cv::cvtColor(rainbow_image, rainbow_image, CV_HSV2RGB);
+
+    cv::Mat variance_image;
+    cv::merge(std::vector<cv::Mat>{b, g, r}, variance_image);
+
+    cv::imshow(title, rainbow_image);
+    cv::imshow(title + "_var", variance_image);
 }
 
 inline void show_residuals(const std::string& title,

@@ -15,19 +15,30 @@
 #include "misc_utils.hpp"
 #include "static_cast_func.hpp"
 
+using Grid = ceres::Grid2D<float, 1, false, false>;
+
 template<template<class, int> class G>
 struct warp_error
 {
-    warp_error(const Eigen::Matrix3f& intrinsic, const Image* const new_image,
-               const Image* const ref_image, float x, float y, float inv_depth)
-        : new_image(new_image), ref_image(ref_image),
+    warp_error(const Eigen::Matrix3f& intrinsic, const Grid* const new_grid,
+               const Image* const ref_image, const Image* const ref_variance,
+               float x, float y, float inv_depth, float variance)
+        : new_grid(new_grid), new_interp(*new_grid),
+          ref_image(ref_image), ref_variance(ref_variance),
           f_x(intrinsic(0, 0)), f_y(intrinsic(1, 1)),
           c_x(intrinsic(0, 2)), c_y(intrinsic(1, 2)),
-          x(x), y(y), inv_depth(inv_depth) { }
+          x(x), y(y), inv_depth(inv_depth), variance(variance) { }
 
     template<class T>
     bool operator()(const T* const transform_, T* residuals) const
     {
+        T variance = T((*ref_variance)(int(y), int(x)));
+        if (variance <= T(0))
+        {
+            residuals[0] = T(0);
+            return true;
+        }
+
         G<T, 0> transform;
         std::copy(transform_, transform_ + G<T, 0>::num_parameters, transform.data());
 
@@ -41,31 +52,36 @@ struct warp_error
         T x2 = p2.x() * (T(f_x) / p2.z()) + T(c_x);
         T y2 = p2.y() * (T(f_y) / p2.z()) + T(c_y);
 
-        // TODO make member
-        using Grid = ceres::Grid2D<float, 1, false, false>;
-        Grid new_grid(new_image->data(), 0, new_image->rows(), 0, new_image->cols());
-        ceres::BiCubicInterpolator<Grid> new_interp(new_grid);
+        //Grid new_depth_grid(new_depth->data(), 0, new_depth->rows(), 0, new_depth->cols());
+        //ceres::BiCubicInterpolator<Grid> new_depth_interp(new_depth_grid);
 
         T new_intensity;
         new_interp.Evaluate(y2, x2, &new_intensity);
         T ref_intensity = T((*ref_image)(int(y), int(x)));
-        residuals[0] = T(ref_intensity - new_intensity);
-        // TODO: variance
-        // kvp.second.variance = std::pow(inv_depth / kvp.second.mean, 4) * variance;
+        //T new_depth_pixel;
+        //new_depth_interp.Evaluate(y2, x2, &new_depth_pixel);
+        //TODO why does tracking suddenly suck?
+        residuals[0] = T(ref_intensity - new_intensity) / variance;
+        //residuals[1] = T(1.0 / inv_depth) - new_depth_pixel;
         return true;
     }
 
     static ceres::CostFunction* create(const Eigen::Matrix3f& intrinsic,
-                                       const Image* const new_image,
+                                       const Grid* const new_grid,
                                        const Image* const ref_image,
-                                       float x, float y, float inv_depth)
+                                       const Image* const ref_variance,
+                                       float x, float y, float inv_depth, float variance)
     {
         return (new ceres::AutoDiffCostFunction<warp_error, 1, G<double, 0>::num_parameters>(
-                    new warp_error(intrinsic, new_image, ref_image, x, y, inv_depth)));
+                    new warp_error(intrinsic, new_grid, ref_image, ref_variance, x, y,
+                                   inv_depth, variance)));
     }
 
-    const Image* const new_image;
+    //const Image* const new_image;
+    const Grid* const new_grid;
+    ceres::BiCubicInterpolator<Grid> new_interp;
     const Image* const ref_image;
+    const Image* const ref_variance;
     float f_x;
     float f_y;
     float c_x;
@@ -73,11 +89,13 @@ struct warp_error
     float x;
     float y;
     float inv_depth;
+    float variance;
 };
 
 template<template<class, int> class G, class T, int O>
 G<T, O> photometric_tracking(const sparse_gaussian& sparse_inverse_depth,
                           const Image& new_image, const Image& ref_image,
+                          const Image& ref_variance,
                           const Eigen::Matrix3f& intrinsic,
                           const std::function<float(float)>& weighting,
                           const G<T, O>& guess,
@@ -87,6 +105,19 @@ G<T, O> photometric_tracking(const sparse_gaussian& sparse_inverse_depth,
     auto width = new_image.cols();
 
     G<double, O> ksi = guess.template cast<double>();
+
+    ceres::Solver::Options options;
+    options.linear_solver_type = ceres::DENSE_QR;
+    options.minimizer_progress_to_stdout = true;
+    options.num_threads = 4;
+    options.minimizer_type = ceres::LINE_SEARCH;
+    options.max_lbfgs_rank = 20;
+    options.trust_region_strategy_type = ceres::DOGLEG;
+    options.max_num_iterations = 20;
+    options.preconditioner_type = ceres::JACOBI;
+    options.max_num_line_search_step_size_iterations = 10;
+    //options.max_solver_time_in_seconds = 0.1;
+    auto loss_func = ceres::HuberLoss(1.0);
 
     int pyr_i = -1;
     for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
@@ -98,27 +129,26 @@ G<T, O> photometric_tracking(const sparse_gaussian& sparse_inverse_depth,
 
         auto ref_resized = pyramid(ref_image, pyr);
         auto new_resized = pyramid(new_image, pyr);
+        Grid new_grid(new_resized.data(), 0, new_resized.rows(), 0, new_image.cols());
 
         ceres::Problem problem;
         problem.AddParameterBlock(ksi.data(), G<T, O>::num_parameters,
                                   new Sophus::LocalParameterization<G<double, O>, true>);
 
-        for (size_t i = 0; i < sparse_inverse_depth.size(); i += pyr)
+        for (size_t i = 0; i < sparse_inverse_depth.size(); i += 1)
         {
             auto cost_func = warp_error<G>::create(
                 pyramid_intrinsic,
-                &new_resized,
+                &new_grid,
                 &ref_resized,
+                &ref_variance,
                 sparse_inverse_depth[i].first.x() / pyr,
                 sparse_inverse_depth[i].first.y() / pyr,
-                sparse_inverse_depth[i].second.mean);
-            problem.AddResidualBlock(cost_func, NULL, ksi.data());
+                sparse_inverse_depth[i].second.mean,
+                sparse_inverse_depth[i].second.variance);
+            problem.AddResidualBlock(cost_func, new ceres::HuberLoss(loss_func), ksi.data());
         }
 
-        ceres::Solver::Options options;
-        options.linear_solver_type = ceres::DENSE_QR;
-        options.minimizer_progress_to_stdout = true;
-        options.num_threads = 4;
         ceres::Solver::Summary summary;
         ceres::Solve(options, &problem, &summary);
 
@@ -126,7 +156,5 @@ G<T, O> photometric_tracking(const sparse_gaussian& sparse_inverse_depth,
     }
 
     G<T, O> ksi_ = ksi.template cast<T>();
-    std::cout << "min pose:" << std::endl << ksi_.matrix() << std::endl;
-
     return ksi_;
 }

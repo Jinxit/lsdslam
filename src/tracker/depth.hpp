@@ -25,7 +25,7 @@ namespace depth
         Sophus::SE3f update(const studd::two<Image>& observation, const Sophus::SE3f& guess);
 
     private:
-        studd::two<Image> filter_depth(studd::two<Image> depth);
+        studd::two<Image> filter_depth(studd::two<Image> depth, const Image& intensity);
 
         Eigen::Matrix3f intrinsic;
     };

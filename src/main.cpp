@@ -53,7 +53,7 @@ int main(int argc, const char* argv[])
     auto data = tum::loader("data/TUM/freiburg2_xyz/");
     auto sc = data.get_calibration();
 
-    unsigned int frame_skip = 3;
+    unsigned int frame_skip = 1;
     unsigned int start_offset = 0;
 
     auto first_frame = data[start_offset];
@@ -69,7 +69,7 @@ int main(int argc, const char* argv[])
         auto new_frame = data[i];
         auto guess = data[i - frame_skip].pose.inverse() * new_frame.pose;
         auto start = std::chrono::steady_clock::now();
-        auto travelled = t.update({new_frame.intensity, new_frame.depth}, guess);
+        auto travelled = t.update({new_frame.intensity, new_frame.depth}, new_frame.pose);
         auto end = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration<double, std::milli>(end - start).count();
         //std::cerr << ms << " ms" << std::endl;

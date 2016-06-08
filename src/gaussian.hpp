@@ -20,7 +20,7 @@ struct gaussian
 
         if (std::abs(lhs.mean - rhs.mean) > lhs.variance * 2)
         {
-            if (lhs.mean > rhs.mean)
+            if (lhs.mean < rhs.mean)
             {
                 return lhs;
             }
