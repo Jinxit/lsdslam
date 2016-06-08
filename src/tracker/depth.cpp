@@ -63,12 +63,25 @@ namespace depth
 
         //play(sparse_depth, new_intensity, kf.intensity, intrinsic);
 
+        ceres::Solver::Options options;
+        options.linear_solver_type = ceres::DENSE_QR;
+        options.minimizer_progress_to_stdout = true;
+        options.num_threads = 4;
+        options.minimizer_type = ceres::LINE_SEARCH;
+        options.max_lbfgs_rank = 20;
+        options.trust_region_strategy_type = ceres::DOGLEG;
+        options.max_num_iterations = 20;
+        options.preconditioner_type = ceres::JACOBI;
+        options.max_num_line_search_step_size_iterations = 10;
+        options.max_solver_time_in_seconds = 0.25;
+
         auto current_to_kf_guess = kf.pose.inverse() * pose;
         Sophus::SE3f transform = photometric_tracking<Sophus::SE3Group>(
             sparse_depth,
             new_intensity, kf.intensity, new_depth[0],
             intrinsic,
-            weighting,
+            ceres::HuberLoss(1.0),
+            options,
             current_to_kf_guess,
             16);
         show_residuals("minimized", intrinsic, new_intensity, kf.intensity, sparse_depth,

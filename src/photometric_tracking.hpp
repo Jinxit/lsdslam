@@ -92,12 +92,13 @@ struct warp_error
     float variance;
 };
 
-template<template<class, int> class G, class T, int O>
+template<template<class, int> class G, class T, int O, class LossFunc>
 G<T, O> photometric_tracking(const sparse_gaussian& sparse_inverse_depth,
                           const Image& new_image, const Image& ref_image,
                           const Image& ref_variance,
                           const Eigen::Matrix3f& intrinsic,
-                          const std::function<float(float)>& weighting,
+                          const LossFunc& loss_func,
+                          const ceres::Solver::Options options,
                           const G<T, O>& guess,
                           int max_pyramid)
 {
@@ -105,19 +106,6 @@ G<T, O> photometric_tracking(const sparse_gaussian& sparse_inverse_depth,
     auto width = new_image.cols();
 
     G<double, O> ksi = guess.template cast<double>();
-
-    ceres::Solver::Options options;
-    options.linear_solver_type = ceres::DENSE_QR;
-    options.minimizer_progress_to_stdout = true;
-    options.num_threads = 4;
-    options.minimizer_type = ceres::LINE_SEARCH;
-    options.max_lbfgs_rank = 20;
-    options.trust_region_strategy_type = ceres::DOGLEG;
-    options.max_num_iterations = 20;
-    options.preconditioner_type = ceres::JACOBI;
-    options.max_num_line_search_step_size_iterations = 10;
-    //options.max_solver_time_in_seconds = 0.1;
-    auto loss_func = ceres::HuberLoss(1.0);
 
     int pyr_i = -1;
     for (int pyr = max_pyramid; pyr > 0; pyr /= 2)
