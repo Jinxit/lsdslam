@@ -44,30 +44,62 @@ protected:
                                       const Eigen::Matrix3f& intrinsic)
     {
         // TODO: this is def not working
-        /*int height = resolution.y();
+        int height = resolution.y();
         int width = resolution.x();
 
         auto fundamental = fundamental_from_transform(transform, intrinsic);
         auto epilines = generate_epilines(height, width, fundamental);
         auto epipole = generate_epipole(transform, intrinsic);
         auto disparity = disparity_epilines(new_image, ref_image, epilines, epipole);
+        Image geo_im = Image::Zero(height, width);
+        Image photo_im = Image::Zero(height, width);
+        show_epilines("epilines", epilines, epipole, new_image);
+        auto uh = (disparity[0].cwiseProduct(disparity[0]) + disparity[1].cwiseProduct(disparity[1])).cwiseSqrt().eval();
+        show("xy_disp", uh, true);
+        show_disparity("l_disp", disparity, ref_image, true);
 
-        // TODO: investigate, transform might not equal baseline
-        float bf = ((transform.translation().norm()) * intrinsic(1, 1));
+        Eigen::Matrix<float, 3, 4> Ma = intrinsic * Sophus::SE3f().matrix3x4();
+        Eigen::Matrix<float, 3, 4> Mb = intrinsic * transform.matrix3x4();
+        auto depth = [&](float xa, float ya, float xb, float yb) {
+            Eigen::MatrixXf A = Eigen::Matrix4f();
+            A.row(0) = xa * (Ma.row(2) - Ma.row(0));
+            A.row(1) = ya * (Ma.row(2) - Ma.row(1));
+            A.row(2) = xb * (Mb.row(2) - Mb.row(0));
+            A.row(3) = yb * (Mb.row(2) - Mb.row(1));
+
+            Eigen::JacobiSVD<Eigen::MatrixXf> svd(A, Eigen::ComputeThinU | Eigen::ComputeThinV);
+            Eigen::Matrix<float, 4, 1> coords = svd.singularValues();
+
+            if (coords(3) == 0)
+            {
+                return 0.0f;
+            }
+            return coords(2) / coords(3);
+        };
 
         size_t j = 0;
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
             {
-                auto disp = Eigen::Vector2f{disparity[0](y, x), 0};
-                // TODO: this shit seems a bit strange since it's rectified
+                auto dx = disparity[0](y, x);
+                auto dy = disparity[1](y, x);
+
+                if (dx != dx || dy != dy)
+                {
+                    disparity[0](y, x) = 0;
+                    disparity[1](y, x) = -1;
+                }
+
+                auto disp = Eigen::Vector2f{dx, dy};
                 // also why don't we use the mean here?
                 auto geo = geometric_disparity(gradient, epilines[j], x, y, epipole);
                 auto photo = photometric_disparity(new_image, ref_image, gradient,
                                                    epilines[j], x, y, disp, epipole);
+                geo_im(y, x) = std::log(geo.variance);
+                photo_im(y, x) = std::log(photo.variance);
 
-                if (std::min(geo.variance, photo.variance) > 0.01)
+                if (std::min(geo.variance, photo.variance) > 0.05)
                 {
                     disparity[0](y, x) = 0;
                     disparity[1](y, x) = -1;
@@ -75,16 +107,26 @@ protected:
                 else
                 {
                     // TODO: should this be done before photometric disparity?
-                    disparity[0](y, x) /= bf;
-                    // TODO: times alpha^2, figure out what alpha is
-                    disparity[1](y, x) = geo.variance + photo.variance;
+                    auto d = depth(x, y, x - dx, y - dy);
+                    if (d > 0)
+                    {
+                        disparity[0](y, x) = d;
+                        // TODO: times alpha^2, figure out what alpha is
+                        disparity[1](y, x) = geo.variance + photo.variance;
+                    }
+                    else
+                    {
+                        disparity[0](y, x) = 0;
+                        disparity[1](y, x) = -1;
+                    }
                 }
                 j++;
             }
         }
+        show("geo", geo_im, true);
+        show("photo", photo_im, true);
 
-        return disparity;*/
-        return studd::two<Image>();
+        return disparity;
     }
 
     studd::two<Image> regularize_depth(const studd::two<Image>& inverse_depth)
@@ -150,7 +192,7 @@ protected:
         {
             for (int x = 0; x < lhs[0].cols(); x++)
             {
-                if (lhs[1](y, x) > 0)
+                if (lhs[1](y, x) > 0 || true)
                 {
                     auto fused = gaussian(lhs[0](y, x), lhs[1](y, x))
                                ^ gaussian(rhs[0](y, x), rhs[1](y, x));
@@ -169,9 +211,9 @@ protected:
     Eigen::Matrix3f fundamental_from_transform(const Sophus::SE3f& transform,
                                                const Eigen::Matrix3f& intrinsic)
     {
-        Eigen::Vector3f e = intrinsic * transform.rotationMatrix().transpose()
-                                      * transform.translation();
-        return intrinsic.transpose().inverse() * transform.rotationMatrix() * skewed(e);
+        Eigen::Matrix3f ess = skewed(transform.translation()) * transform.rotationMatrix();
+        Eigen::Matrix3f fun = intrinsic.transpose().inverse() * ess * intrinsic.inverse();
+        return fun;
     }
 
     Sophus::SE3f pose;

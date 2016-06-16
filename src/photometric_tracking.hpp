@@ -52,6 +52,13 @@ struct warp_error
         T x2 = p2.x() * (T(f_x) / p2.z()) + T(c_x);
         T y2 = p2.y() * (T(f_y) / p2.z()) + T(c_y);
 
+        if (p2.z() < T(0) || x2 < T(0) || y2 < T(0) ||
+            x2 > T(ref_image->cols()) || y2 > T(ref_image->rows()))
+        {
+            residuals[0] = T(1.0);
+            return true;
+        }
+
         //Grid new_depth_grid(new_depth->data(), 0, new_depth->rows(), 0, new_depth->cols());
         //ceres::BiCubicInterpolator<Grid> new_depth_interp(new_depth_grid);
 

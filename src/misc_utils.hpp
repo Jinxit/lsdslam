@@ -10,6 +10,15 @@ inline void show(const std::string& title, const Image& image, bool normalize = 
 {
     cv::Mat cv_image;
     cv::eigen2cv(image, cv_image);
+    for (int y = 0; y < image.rows(); y++)
+    {
+        for (int x = 0; x < image.cols(); x++)
+        {
+            auto& p = cv_image.at<float>(y, x);
+            if (p != p)
+                p = 0;
+        }
+    }
     if (normalize)
         cv::normalize(cv_image, cv_image, 1, 0, cv::NORM_INF);
     //std::cout << "show " << image(0, 0) << " " << cv_image.at<float>(0, 0) << std::endl;
@@ -38,7 +47,7 @@ inline void show_rgb(const std::string& title, const Image& r, const Image& g, c
 }
 
 inline void show_rainbow(const std::string& title, const studd::two<Image>& image,
-                         const Image& base)
+                         const Image& base, bool normalize = true)
 {
     auto height = image[0].rows();
     auto width = image[0].cols();
@@ -54,23 +63,26 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
     {
         for (int x = 0; x < width; x++)
         {
+            auto var = interpolate<float>(0, 1, image[1](y, x));
             if (image[1](y, x) < 0 || x < 5 || x > width - 5 || y < 5 || y > height - 5
-                || image[0](y, x) == -1.0f)
+                || image[0](y, x) == -1.0f || image[1](y, x) <= 0)
             {
                 v.at<float>(y, x) = 0;
             }
             else if (image[0](y, x) != 0)
             {
                 h.at<float>(y, x) = std::abs(image[0](y, x));
+                v.at<float>(y, x) = 1.0f - var;
             }
             if (image[1](y, x) > 0)
             {
-                r.at<float>(y, x) = interpolate<float>(0, 1, image[1](y, x));
-                g.at<float>(y, x) = 1.0f - r.at<float>(y, x);
+                r.at<float>(y, x) = var;
+                g.at<float>(y, x) = 1.0f - var;
             }
         }
     }
-    cv::normalize(h, h, 255, 0, cv::NORM_INF);
+    if (normalize)
+        cv::normalize(h, h, 255, 0, cv::NORM_INF);
     cv::Mat rainbow_image;
     cv::merge(std::vector<cv::Mat>{h, s, v}, rainbow_image);
     cv::cvtColor(rainbow_image, rainbow_image, CV_HSV2RGB);
@@ -165,4 +177,47 @@ inline void show_residuals(const std::string& title, const Eigen::Matrix3f& intr
                    warp(sparse_inverse_depth, intrinsic, transform), height, width,
                    magnification);
 
+}
+
+inline void show_epilines(const std::string& title, const std::vector<epiline>& epilines,
+                          const Eigen::Vector2f& epipole, const Image& image)
+{
+    cv::Mat cv_image;
+    cv::eigen2cv(image, cv_image);
+    cv::cvtColor(cv_image, cv_image, CV_GRAY2BGR);
+
+    for (size_t i = 0; i < epilines.size(); i += 1000)
+    {
+        auto line = epilines[i].line;
+        auto x0 = 0;
+        auto y0 = int(-line.z() / line.y());
+        auto x1 = int(image.cols());
+        auto y1 = int(-(line.z() + line.x() * image.cols()) / line.y());
+        cv::line(cv_image, cv::Point2f(x0, y0), cv::Point2f(x1, y1), cv::Scalar(0, 1, 0), 1);
+    }
+
+    cv::imshow(title, cv_image);
+}
+
+inline void show_disparity(const std::string& title, const studd::two<Image>& disparity,
+                           const Image& image, bool normalize = false)
+{
+    cv::Mat cv_image;
+    cv::eigen2cv(image, cv_image);
+    cv::cvtColor(cv_image, cv_image, CV_GRAY2BGR);
+
+    for (size_t y = 0; y < image.rows(); y += 21)
+    {
+        for (size_t x = 0; x < image.cols(); x += 13)
+        {
+            auto x1 = x + disparity[0](y, x);
+            auto y1 = y + disparity[0](y, x);
+            cv::line(cv_image, cv::Point2f(x, y), cv::Point2f(x1, y1), cv::Scalar(0, 0, 0.8), 1);
+        }
+    }
+
+    if (normalize)
+        cv::normalize(cv_image, cv_image, 1, 0, cv::NORM_INF);
+
+    cv::imshow(title, cv_image);
 }

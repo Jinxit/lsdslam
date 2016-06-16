@@ -22,7 +22,7 @@ namespace depth
         kf.intensity = observation[0];
         kf.inverse_depth =
             filter_depth(studd::two<Image>(observation[1],
-                                           Image::Ones(resolution.y(), resolution.x())),
+                                           Image::Constant(resolution.y(), resolution.x(), 0.5)),
                          kf.intensity);
     }
 
@@ -47,12 +47,12 @@ namespace depth
 
     Sophus::SE3f tracker::update(const studd::two<Image>& observation, const Sophus::SE3f& guess)
     {
-        constexpr float keyframe_distance = 0.1;
-        constexpr float keyframe_angle = 2 * M_PI / 32;
+        constexpr float keyframe_distance = 0.2;
+        constexpr float keyframe_angle = 2 * M_PI / 16;
 
         auto& new_intensity = observation[0];
         auto new_depth = studd::two<Image>(observation[1],
-                                           Image::Constant(resolution.y(), resolution.x(), 1.0));
+                                           Image::Constant(resolution.y(), resolution.x(), 0.5));
 
         //show_rainbow("before", kf.inverse_depth, observation[0]);
         new_depth = filter_depth(new_depth, new_intensity);
@@ -87,25 +87,16 @@ namespace depth
         show_residuals("starting_point", intrinsic, new_intensity, kf.intensity, sparse_depth,
                        current_to_kf_guess, resolution.y(), resolution.x(), 2);
         pose = transform * kf.pose;
-        std::cout << "pose:" << std::endl << pose.matrix() << std::endl << guess.matrix() << std::endl;
-        auto diff = guess.inverse() * pose;
-        std::cout << "tracked error d: " << diff.translation().norm()
-                  << ", theta: " << Eigen::AngleAxisf(diff.rotationMatrix()).angle() * 180.0f / M_PI << std::endl;
-        std::cout << diff.matrix() << std::endl;
-        auto diff2 = kf.pose.inverse() * guess;
-        std::cout << "true d: " << diff2.translation().norm()
-                  << ", theta: " << Eigen::AngleAxisf(diff2.rotationMatrix()).angle() * 180.0f / M_PI << std::endl;
-        std::cout << diff2.matrix() << std::endl;
+        auto true_transform = kf.pose.inverse() * guess;
         auto warped_depth = /*regularize_depth*/(densify_depth(warp(sparsify_depth(new_depth), intrinsic,
                                                                 transform.inverse()),
                                              resolution.y(), resolution.x()));
         show_rainbow("warped_depth", warped_depth, observation[0]);
-        kf.inverse_depth = fuse_depth(kf.inverse_depth, warped_depth);
-        show_rainbow("fused", kf.inverse_depth, observation[0]);
-        cv::waitKey(0);
+        //kf.inverse_depth = fuse_depth(kf.inverse_depth, warped_depth);
+        //cv::waitKey(1);
 
         if ((transform.translation().norm() > keyframe_distance ||
-            Eigen::AngleAxisf(transform.rotationMatrix()).angle() > keyframe_angle))
+            Eigen::AngleAxisf(transform.rotationMatrix()).angle() > keyframe_angle) && false)
         {
             std::cout << transform.translation() << std::endl;
             std::cout << guess.translation() << std::endl;
@@ -121,15 +112,19 @@ namespace depth
         else
         {
             // TODO: this might need some warping OR just reversing new/ref
-            ////auto t_stereo = temporal_stereo(observation[0], kf.left, gradient, transform);
-            ////show_rainbow("t_stereo", t_stereo, observation[0]);
-            ////kf.inverse_depth = fuse_depth(kf.inverse_depth, t_stereo);
-            ////show_rainbow("fused_temporal_static", kf.inverse_depth, observation[0]);
-            ////cv::waitKey(0);
-            //cv::destroyWindow("fused_temporal_static");
-            //kf.inverse_depth = regularize_depth(kf.inverse_depth);
-            //show_rainbow("regularized", kf.inverse_depth, observation[0]);
+
+            // TODO: store in each KF or at least for current
+            auto gradient = sobel(kf.intensity);
+            auto t_stereo = temporal_stereo(observation[0], kf.intensity,
+                                            gradient, true_transform, intrinsic);
+            //show_rainbow("t_stereo", t_stereo, observation[0]);
+            //show_rainbow("fused_temporal_static", kf.inverse_depth, observation[0]);
             //cv::waitKey(0);
+            show_rainbow("temporal_stereo", t_stereo, observation[0]);
+            show_rainbow("true_depth", new_depth, observation[0]);
+            kf.inverse_depth = fuse_depth(kf.inverse_depth, t_stereo);
+            show_rainbow("fused", kf.inverse_depth, observation[0]);
+            cv::waitKey(0);
         }
         //play(observation[0], observation[1]);
 

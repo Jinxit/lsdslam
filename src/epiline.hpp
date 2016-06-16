@@ -23,9 +23,9 @@ struct epiline
 inline epiline generate_epiline(const Eigen::Vector2i& p,
                                 const Eigen::Matrix3f& fundamental)
 {
-    Eigen::Vector3f line = fundamental * Eigen::Vector3f(p.x(), p.y(), 1);
+    Eigen::Vector3f line = fundamental.transpose() * Eigen::Vector3f(p.x(), p.y(), 1);
     auto nu = studd::square(line[0]) + studd::square(line[1]);
-    if (nu != 0)
+    if (nu != 0 && !(nu != nu))
     {
         line /= std::sqrt(nu);
     }

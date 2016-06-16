@@ -21,7 +21,7 @@ inline gaussian geometric_disparity(const studd::two<Image>& gradient,
                                     const epiline& epi, int x, int y,
                                     const Eigen::Vector2f& epipole)
 {
-    constexpr float sigma_l = 0.1f;
+    constexpr float sigma_l = 0.05f;
 
     Eigen::Vector2f g(gradient[0](y, x), gradient[1](y, x));
     if (g.x() == 0 && g.y() == 0)
@@ -42,7 +42,7 @@ inline gaussian photometric_disparity(const Image& new_image,
                                       const Eigen::Vector2f& disparity_0,
                                       const Eigen::Vector2f& epipole)
 {
-    constexpr float sigma_i = 0.01f;
+    constexpr float sigma_i = 0.05f;
 
     Eigen::Vector2f g(gradient[0](y, x), gradient[1](y, x));
     auto g_p = g.x() * epi.line[0] + g.y() * epi.line[1];
@@ -54,18 +54,59 @@ inline gaussian photometric_disparity(const Image& new_image,
                                                disparity_0[1] + epi.point.y());
     float lambda_disp = 0;
     if (lambda_0.x() >= 0 && lambda_0.x() < new_image.cols() &&
-        lambda_0.y() >= 0 && lambda_0.y() < new_image.cols())
+        lambda_0.y() >= 0 && lambda_0.y() < new_image.rows())
     {
         lambda_disp = new_image(lambda_0.y(), lambda_0.x());
     }
     auto disparity = disparity_0.norm() + (ref_image(y, x) - lambda_disp) / g_p;
-    auto variance = (sigma_i * sigma_i) / (g_p * g_p);
+    auto variance = 2 * (sigma_i * sigma_i) / (g_p * g_p);
     return gaussian(disparity, variance);
 }
 
 inline studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline,
                                                   int height, int width)
 {
+    auto A = epiline[0];
+    auto B = epiline[1];
+    auto C = epiline[2];
+
+    if ((A == 0 && B == 0) || A != A || B != B)
+        return {Eigen::Vector2f(0, 0), Eigen::Vector2f(0, 0)};
+
+    auto a = Eigen::Vector2f(0, -C / B);
+    auto b = Eigen::Vector2f((-B * (height - 1) - C) / A, (height - 1));
+    auto c = Eigen::Vector2f((width - 1), (-A * (width - 1) - C) / B);
+    auto d = Eigen::Vector2f(-C / A, 0);
+
+    auto safe = [&](const Eigen::Vector2f& p) {
+        return p.x() >= 0 && p.y() >= 0 && int(p.x()) < width && int(p.y()) < height;
+    };
+
+    for (auto&& p1 : {a, b, c, d})
+    {
+        for (auto&& p2 : {a, b, c, d})
+        {
+            if (p1 == p2)
+                continue;
+
+            if (safe(p1) && safe(p2))
+            {
+                //std::cout << "before: " << A << ", " << B << ", " << C << std::endl;
+                //std::cout << "after: " << p1.x() << ", " << p1.y() << "; " << p2.x() << ", " << p2.y() << std::endl;
+                if (p1.x() < p2.x())
+                    return {p1, p2};
+                else
+                    return {p2, p1};
+            }
+        }
+    }
+    return {Eigen::Vector2f(0, 0), Eigen::Vector2f(0, 0)};
+}
+
+inline studd::two<Eigen::Vector2f> epiline_limits2(Eigen::Vector3f epiline,
+                                                  int height, int width)
+{
+    std::cout << "before: " << epiline[0] << ", " << epiline[1] << ", " << epiline[2] << std::endl;
     auto fx = [&](float x) {
         return -(epiline[0] * x + epiline[2]) / epiline[1];
     };
@@ -97,6 +138,7 @@ inline studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline,
         y1 = height;
         x1 = fy(y1);
     }
+    std::cout << "after: " << x0 << ", " << y0 << "; " << x1 << ", " << y1 << std::endl;
 
     return studd::make_two(Eigen::Vector2f(x0, y0), Eigen::Vector2f(x1, y1));
 }
@@ -105,7 +147,7 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
                                             const std::vector<epiline>& epilines,
                                             const Eigen::Vector2f& epipole)
 {
-    constexpr float epiline_sample_distance = 5.0f;
+    constexpr float epiline_sample_distance = 1.0f;
     constexpr size_t num_epiline_samples = 5; // must be odd
     constexpr int half_epiline_samples = num_epiline_samples / 2;
 
@@ -136,10 +178,8 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
         return total;
     };
 
-    int i = 0;
     for (auto&& epi : epilines)
     {
-        i++;
         Eigen::Vector2f p0, p1;
         std::tie(p0, p1) = epiline_limits(epi.line, height, width);
 
@@ -172,7 +212,7 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
                 if (current_ssd < min_ssd)
                 {
                     min_ssd = current_ssd;
-                    min_p = p + dp_total / 2;
+                    min_p = epi.point.cast<float>() + dp_total / 2;
                 }
             }
 
@@ -181,12 +221,17 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
 
         if (min_p.x() == -1000)
         {
+            disparity[0](epi.point.y(), epi.point.x()) =
+            disparity[1](epi.point.y(), epi.point.x()) =
+                std::numeric_limits<float>::quiet_NaN();
             continue;
         }
 
         disparity[0](epi.point.y(), epi.point.x()) = min_p.x() - epi.point.x();
         disparity[1](epi.point.y(), epi.point.x()) = min_p.y() - epi.point.y();
     }
+    show("x_disp", disparity[0], true);
+    show("y_disp", disparity[1], true);
 
     return disparity;
 }

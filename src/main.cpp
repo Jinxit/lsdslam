@@ -46,7 +46,7 @@ int main(int argc, const char* argv[])
     auto data = tum::loader("data/TUM/freiburg2_xyz/");
     auto sc = data.get_calibration();
 
-    unsigned int frame_skip = 1;
+    unsigned int frame_skip = 10;
     unsigned int start_offset = 0;
 
     auto first_frame = data[start_offset];

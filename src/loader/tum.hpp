@@ -24,7 +24,7 @@ namespace tum
 
     struct calibration
     {
-        Eigen::Matrix3f intrinsic;
+        Eigen::Matrix3f intrinsic = Eigen::Matrix3f::Zero();
         Eigen::Vector2i resolution;
     };
 
