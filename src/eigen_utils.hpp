@@ -103,12 +103,18 @@ ImageMatrix max_pool(const Eigen::MatrixBase<ImageMatrix>& image,
     return output;
 }
 
+template<class T>
+inline T interpolate(T lhs, T rhs, float t)
+{
+    return (1.0f - t) * lhs + t * rhs;
+}
+
 inline Sophus::SE3f interpolate(const Sophus::SE3f& lhs, const Sophus::SE3f& rhs, float t)
 {
     Sophus::SE3f result;
     result.setQuaternion(Eigen::Quaternionf(lhs.rotationMatrix())
                          .slerp(t, Eigen::Quaternionf(rhs.rotationMatrix())));
-    result.translation() = (1 - t) * lhs.translation() + t * rhs.translation();
+    result.translation() = interpolate(lhs.translation(), rhs.translation(), t);
     return result;
 }
 
@@ -126,12 +132,6 @@ inline float interpolate(const Image& image, const Eigen::Vector2f& p)
          + image(ip.y(),     ip.x() + 1) * top_right
          + image(ip.y() + 1, ip.x()    ) * bottom_left
          + image(ip.y() + 1, ip.x() + 1) * bottom_right;
-}
-
-template<class T>
-inline T interpolate(T lhs, T rhs, float t)
-{
-    return (1.0f - t) * lhs + t * rhs;
 }
 
 inline studd::two<Image> densify_depth(const sparse_gaussian& sparse_inverse_depth,

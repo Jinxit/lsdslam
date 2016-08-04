@@ -20,6 +20,7 @@ namespace tum
         Image intensity;
         Image depth;
         Sophus::SE3f pose;
+        double timestamp;
     };
 
     struct calibration
@@ -34,9 +35,10 @@ namespace tum
         loader(const std::string& folder);
 
         frame operator[](size_t i) override;
+        size_t size() const override;
 
     private:
-        Sophus::SE3f pose_at(const std::string& i);
+        std::pair<double, Sophus::SE3f> pose_at(const std::string& i);
 
         std::string folder;
         std::vector<studd::two<std::string>> indices;

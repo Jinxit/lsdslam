@@ -10,6 +10,7 @@ public:
 
     virtual Frame operator[](size_t i) = 0;
     virtual Calibration get_calibration() const { return c; }
+    virtual size_t size() const = 0;
 
 protected:
     Calibration c;

@@ -56,7 +56,6 @@ protected:
         show_epilines("epilines", epilines, epipole, new_image);
         auto uh = (disparity[0].cwiseProduct(disparity[0]) + disparity[1].cwiseProduct(disparity[1])).cwiseSqrt().eval();
         show("xy_disp", uh, true);
-        show_disparity("l_disp", disparity, ref_image, true);
 
         Eigen::Matrix<float, 3, 4> Ma = intrinsic * Sophus::SE3f().matrix3x4();
         Eigen::Matrix<float, 3, 4> Mb = intrinsic * transform.matrix3x4();

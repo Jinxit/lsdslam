@@ -21,14 +21,24 @@ struct epiline
 
 
 inline epiline generate_epiline(const Eigen::Vector2i& p,
-                                const Eigen::Matrix3f& fundamental)
+                                const Eigen::Matrix3f& fundamental, int height, int width)
 {
-    Eigen::Vector3f line = fundamental.transpose() * Eigen::Vector3f(p.x(), p.y(), 1);
+    /*
+    std::vector<cv::Point2f> in{cv::Point2f(p.x(), p.y())};
+    std::vector<cv::Point3f> out;
+    cv::Mat F;
+    cv::eigen2cv(fundamental, F);
+    cv::computeCorrespondEpilines(in, 2, F, out);
+    return epiline(p, Eigen::Vector3f(out[0].x, out[0].y, out[0].z));
+    */
+
+    Eigen::Vector3f line = fundamental * Eigen::Vector3f(p.x(), p.y(), 1);
     auto nu = studd::square(line[0]) + studd::square(line[1]);
     if (nu != 0 && !(nu != nu))
     {
-        line /= std::sqrt(nu);
+        //line /= std::sqrt(nu);
     }
+
     return epiline(p, line);
 }
 
@@ -41,7 +51,7 @@ inline std::vector<epiline> generate_epilines(int height, int width,
     {
         for (int x = 0; x < width; x++)
         {
-            epilines.emplace_back(generate_epiline(Eigen::Vector2i(x, y), fundamental));
+            epilines.emplace_back(generate_epiline(Eigen::Vector2i(x, y), fundamental, height, width));
         }
     }
 

@@ -74,8 +74,8 @@ inline studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline,
         return {Eigen::Vector2f(0, 0), Eigen::Vector2f(0, 0)};
 
     auto a = Eigen::Vector2f(0, -C / B);
-    auto b = Eigen::Vector2f((-B * (height - 1) - C) / A, (height - 1));
-    auto c = Eigen::Vector2f((width - 1), (-A * (width - 1) - C) / B);
+    auto b = Eigen::Vector2f((-B * (height - 1) - C) / A, height - 1);
+    auto c = Eigen::Vector2f(width - 1, (-A * (width - 1) - C) / B);
     auto d = Eigen::Vector2f(-C / A, 0);
 
     auto safe = [&](const Eigen::Vector2f& p) {
@@ -94,9 +94,9 @@ inline studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline,
                 //std::cout << "before: " << A << ", " << B << ", " << C << std::endl;
                 //std::cout << "after: " << p1.x() << ", " << p1.y() << "; " << p2.x() << ", " << p2.y() << std::endl;
                 if (p1.x() < p2.x())
-                    return {p1, p2};
-                else
                     return {p2, p1};
+                else
+                    return {p1, p2};
             }
         }
     }
@@ -158,7 +158,7 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
                                                   Image::Zero(height, width));
 
     auto safe = [&](const Eigen::Vector2f& p) {
-        return p.x() >= 0 && p.y() >= 0 && p.x() < width && p.y() < height;
+        return p.x() >= 0 && p.y() >= 0 && p.x() < width - 1 && p.y() < height - 1;
     };
 
     auto ssd = [&](const std::array<float, num_epiline_samples> target,
@@ -167,10 +167,7 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
         float total = 0;
         for (size_t i = 0; i < num_epiline_samples; i++)
         {
-            if (!safe(p))
-                total += 1000;
-            else
-                total += studd::square(target[i] - new_image(p.y(), p.x()));
+            total += studd::square(target[i] - interpolate(new_image, p));
 
             p += dp;
         }
@@ -184,8 +181,16 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
         std::tie(p0, p1) = epiline_limits(epi.line, height, width);
 
         std::array<float, num_epiline_samples> target{{0}};
-        auto p = p0;
+        Eigen::Vector2f p = p0;
         Eigen::Vector2f dp = (p1 - p0).normalized() * epiline_sample_distance;
+
+        if (p0 == p1)
+        {
+            disparity[0](epi.point.y(), epi.point.x()) =
+            disparity[1](epi.point.y(), epi.point.x()) =
+                std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
 
         // set up target values;
         for (int i = 0; i < int(num_epiline_samples); i++)
@@ -194,25 +199,25 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
                                   + dp * float(i - half_epiline_samples);
 
             if (safe(point))
-                target[i] = float(ref_image(point.y(), point.x()));
+                target[i] = interpolate(ref_image, point);
         }
 
         // find distance for n steps
-        Eigen::Vector2f dp_total = dp * int(num_epiline_samples - 1);
+        Eigen::Vector2f dp_total = dp * (num_epiline_samples - 1);
 
         float min_ssd = std::numeric_limits<float>::infinity();
         Eigen::Vector2f min_p(-1000, -1000);
         // keep going for the rest of the line
         while (safe(p + dp_total))
         {
-            if (safe(p + dp_total))
+            if (safe(p) && safe(p + dp_total))
             {
                 float current_ssd = ssd(target, p, dp);
 
                 if (current_ssd < min_ssd)
                 {
                     min_ssd = current_ssd;
-                    min_p = epi.point.cast<float>() + dp_total / 2;
+                    min_p = p + dp_total / 2;
                 }
             }
 
@@ -232,6 +237,7 @@ inline studd::two<Image> disparity_epilines(const Image& new_image, const Image&
     }
     show("x_disp", disparity[0], true);
     show("y_disp", disparity[1], true);
+    show_disparity("l_disp", disparity, ref_image, true);
 
     return disparity;
 }

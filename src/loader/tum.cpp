@@ -5,6 +5,7 @@
 #include <iostream>
 #include <algorithm>
 #include <array>
+#include <iomanip>
 
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
@@ -162,13 +163,13 @@ namespace tum
         frame output;
         output.intensity = intensity_map[indices[i].first];
         output.depth = depth_map[indices[i].second];
-        output.pose = pose_at(indices[i].first);
+        std::tie(output.timestamp, output.pose) = pose_at(indices[i].first);
 
         return output;
     }
 
 
-    Sophus::SE3f loader::pose_at(const std::string& i_str)
+    std::pair<double, Sophus::SE3f> loader::pose_at(const std::string& i_str)
     {
         double i = std::stod(i_str);
         auto it_after = std::lower_bound(poses.begin(), poses.end(),
@@ -183,14 +184,13 @@ namespace tum
             --it_before;
         }
 
-
         double t = (i - it_before->first) / (it_after->first - it_before->first);
-        if (t != t)
-        {
-            return it_before->second;
-        }
-
         auto interp = interpolate(it_before->second, it_after->second, t);
-        return interp;
+        return {i, interp};
+    }
+
+    size_t loader::size() const
+    {
+        return indices.size();
     }
 }

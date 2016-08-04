@@ -63,44 +63,53 @@ namespace depth
 
         ceres::Solver::Options options;
         options.linear_solver_type = ceres::DENSE_QR;
-        options.minimizer_progress_to_stdout = true;
-        options.num_threads = 4;
-        options.minimizer_type = ceres::LINE_SEARCH;
-        options.max_lbfgs_rank = 20;
-        options.trust_region_strategy_type = ceres::DOGLEG;
-        options.max_num_iterations = 20;
-        options.preconditioner_type = ceres::JACOBI;
-        options.max_num_line_search_step_size_iterations = 10;
-        options.max_solver_time_in_seconds = 0.25;
+        options.minimizer_progress_to_stdout = false;
+        options.num_threads = 8;
+        //options.minimizer_type = ceres::LINE_SEARCH;
+        //options.max_lbfgs_rank = 20;
+        //options.trust_region_strategy_type = ceres::DOGLEG;
+        options.max_num_iterations = 50;
+        //options.preconditioner_type = ceres::JACOBI;
+        //options.max_num_line_search_step_size_iterations = 10;
+        //options.max_solver_time_in_seconds = 0.25;
 
+        float usable_ratio = 0;
         auto current_to_kf_guess = kf.pose.inverse() * pose;
+        auto true_transform = kf.pose.inverse() * guess;
         Sophus::SE3f transform = photometric_tracking<Sophus::SE3Group>(
             sparse_depth,
-            new_intensity, kf.intensity, new_depth[0],
+            new_intensity, kf.intensity, kf.inverse_depth[1], new_depth[0],
             intrinsic,
             ceres::HuberLoss(1.0),
             options,
-            current_to_kf_guess,
-            16);
+            current_to_kf_guess.inverse(),
+            8,
+            usable_ratio);
+        //Sophus::SE3f transform = true_transform;
+        //std::cout << "usable_ratio: " << usable_ratio << std::endl;
+        //if (usable_ratio < 1 || transform.translation().norm() > 0.1)
+        //    transform = Sophus::SE3f();
         show_residuals("minimized", intrinsic, new_intensity, kf.intensity, sparse_depth,
-                       transform, resolution.y(), resolution.x(), 2);
+                       transform.inverse(), resolution.y(), resolution.x(), 2);
         show_residuals("starting_point", intrinsic, new_intensity, kf.intensity, sparse_depth,
-                       current_to_kf_guess, resolution.y(), resolution.x(), 2);
-        pose = transform * kf.pose;
-        auto true_transform = kf.pose.inverse() * guess;
+                       current_to_kf_guess.inverse(), resolution.y(), resolution.x(), 2);
+        show_residuals("groundtruth", intrinsic, new_intensity, kf.intensity, sparse_depth,
+                       true_transform.inverse(), resolution.y(), resolution.x(), 2);
+        pose = kf.pose * transform.inverse();
         auto warped_depth = /*regularize_depth*/(densify_depth(warp(sparsify_depth(new_depth), intrinsic,
                                                                 transform.inverse()),
                                              resolution.y(), resolution.x()));
         show_rainbow("warped_depth", warped_depth, observation[0]);
-        //kf.inverse_depth = fuse_depth(kf.inverse_depth, warped_depth);
+        kf.inverse_depth = fuse_depth(kf.inverse_depth, warped_depth);
         //cv::waitKey(1);
 
         if ((transform.translation().norm() > keyframe_distance ||
-            Eigen::AngleAxisf(transform.rotationMatrix()).angle() > keyframe_angle) && false)
+            Eigen::AngleAxisf(transform.rotationMatrix()).angle() > keyframe_angle))
         {
-            std::cout << transform.translation() << std::endl;
-            std::cout << guess.translation() << std::endl;
+            //std::cout << transform.translation() << std::endl;
+            //std::cout << guess.translation() << std::endl;
             std::cout << "new keyframe" << std::endl;
+            std::cout << transform.translation() << std::endl;
             // initialize keyframe
             //kf.inverse_depth = /*regularize_depth*/(densify_depth(warp(sparsify_depth(kf.inverse_depth, 1),
             //                                                       intrinsic, transform),
@@ -109,7 +118,7 @@ namespace depth
             kf.pose = pose;
             kf.intensity = observation[0];
         }
-        else
+        else if (false)
         {
             // TODO: this might need some warping OR just reversing new/ref
 
@@ -126,6 +135,8 @@ namespace depth
             show_rainbow("fused", kf.inverse_depth, observation[0]);
             cv::waitKey(0);
         }
+        show_rainbow("fused", kf.inverse_depth, observation[0]);
+        //cv::waitKey(0);
         //play(observation[0], observation[1]);
 
         return transform;

@@ -43,10 +43,14 @@ int main(int argc, const char* argv[])
 {
     google::InitGoogleLogging(argv[0]);
 
-    auto data = tum::loader("data/TUM/freiburg2_xyz/");
+    srand(0);
+
+    std::string file(argv[1]);
+    std::string tag(argv[2]);
+    auto data = tum::loader("data/TUM/" + file + "/");
     auto sc = data.get_calibration();
 
-    unsigned int frame_skip = 10;
+    unsigned int frame_skip = 1;
     unsigned int start_offset = 0;
 
     auto first_frame = data[start_offset];
@@ -56,7 +60,8 @@ int main(int argc, const char* argv[])
     auto t = depth::tracker(first_frame.pose, sc.resolution, sc.intrinsic,
                             {first_frame.intensity, first_frame.depth});
 
-    for (size_t i = start_offset + frame_skip; i < 10000; i += frame_skip)
+    std::ofstream output("output/" + file + "_" + tag + ".poses");
+    for (size_t i = start_offset + frame_skip; i < data.size(); i += frame_skip)
     {
         //std::cout << "original pose:" << std::endl << t.get_pose().matrix() << std::endl;
         auto new_frame = data[i];
@@ -66,7 +71,7 @@ int main(int argc, const char* argv[])
         auto end = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration<double, std::milli>(end - start).count();
         //std::cerr << ms << " ms" << std::endl;
-        std::cerr << (1000.0 / ms) << " fps" << std::endl;
+        std::cerr << (1000.0 / ms) << " fps, " << i << " / " << data.size() << std::endl;
         //std::cout << "actual pose:" << std::endl << new_frame.pose.matrix() << std::endl;
         //std::cout << "tracked pose:" << std::endl << t.get_pose().matrix() << std::endl;
         //std::cout << "diff: " << std::endl;
@@ -75,6 +80,19 @@ int main(int argc, const char* argv[])
         //report(guess);
         //std::cout << "we travelled: " << std::endl;
         //report(travelled);
-        cv::waitKey(1);
+        //cv::waitKey(1);
+
+        output << std::fixed << std::setprecision(std::numeric_limits<double>::digits10 + 1)
+               << new_frame.timestamp << " "
+               << t.get_pose().translation().x() << " "
+               << t.get_pose().translation().y() << " "
+               << t.get_pose().translation().z() << " "
+               << t.get_pose().unit_quaternion().x() << " "
+               << t.get_pose().unit_quaternion().y() << " "
+               << t.get_pose().unit_quaternion().z() << " "
+               << t.get_pose().unit_quaternion().w() << std::endl;
+#if !LSD_NODRAW
+        cv::waitKey(0);
+#endif
     }
 }

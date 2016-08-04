@@ -4,10 +4,18 @@
 #include "opencv2/highgui/highgui.hpp"
 
 #include "map_range.hpp"
+#include "disparity.hpp"
+
+#if LSD_NODRAW
+#define DRAW return
+#else
+#define DRAW void()
+#endif
 
 inline void show(const std::string& title, const Image& image, bool normalize = false,
                  float multiplier = 1.0f)
 {
+    DRAW;
     cv::Mat cv_image;
     cv::eigen2cv(image, cv_image);
     for (int y = 0; y < image.rows(); y++)
@@ -28,6 +36,7 @@ inline void show(const std::string& title, const Image& image, bool normalize = 
 inline void show_rgb(const std::string& title, const Image& r, const Image& g, const Image& b,
                      int height, int width, bool normalize = false)
 {
+    DRAW;
     cv::Mat cv_r, cv_g, cv_b;
     cv::eigen2cv(r, cv_r);
     cv::eigen2cv(g, cv_g);
@@ -49,6 +58,7 @@ inline void show_rgb(const std::string& title, const Image& r, const Image& g, c
 inline void show_rainbow(const std::string& title, const studd::two<Image>& image,
                          const Image& base, bool normalize = true)
 {
+    DRAW;
     auto height = image[0].rows();
     auto width = image[0].cols();
 
@@ -65,7 +75,7 @@ inline void show_rainbow(const std::string& title, const studd::two<Image>& imag
         {
             auto var = interpolate<float>(0, 1, image[1](y, x));
             if (image[1](y, x) < 0 || x < 5 || x > width - 5 || y < 5 || y > height - 5
-                || image[0](y, x) == -1.0f || image[1](y, x) <= 0)
+                || image[0](y, x) == -1.0f)
             {
                 v.at<float>(y, x) = 0;
             }
@@ -100,6 +110,7 @@ inline void show_residuals(const std::string& title,
                            const sparse_gaussian& warped,
                            int height, int width, int magnification = 4)
 {
+    DRAW;
     auto pyr = new_image.rows() / height;
 
     Image warped_image = Image::Zero(height, width);
@@ -173,51 +184,76 @@ inline void show_residuals(const std::string& title, const Eigen::Matrix3f& intr
                            const Sophus::SE3f& transform,
                            int height, int width, int magnification = 4)
 {
+    DRAW;
     show_residuals(title, new_image, ref_image, sparse_inverse_depth,
                    warp(sparse_inverse_depth, intrinsic, transform), height, width,
                    magnification);
 
 }
 
+// forward declare
+studd::two<Eigen::Vector2f> epiline_limits(Eigen::Vector3f epiline, int height, int width);
+
 inline void show_epilines(const std::string& title, const std::vector<epiline>& epilines,
                           const Eigen::Vector2f& epipole, const Image& image)
 {
-    cv::Mat cv_image;
+    DRAW;
+    cv::Mat cv_image, cv_image2;
     cv::eigen2cv(image, cv_image);
+    //cv::eigen2cv(image, cv_image2);
     cv::cvtColor(cv_image, cv_image, CV_GRAY2BGR);
+    //cv::cvtColor(cv_image2, cv_image2, CV_GRAY2BGR);
 
-    for (size_t i = 0; i < epilines.size(); i += 1000)
+    for (size_t i = 0; i < epilines.size(); i += 4000)
     {
         auto line = epilines[i].line;
         auto x0 = 0;
         auto y0 = int(-line.z() / line.y());
         auto x1 = int(image.cols());
         auto y1 = int(-(line.z() + line.x() * image.cols()) / line.y());
-        cv::line(cv_image, cv::Point2f(x0, y0), cv::Point2f(x1, y1), cv::Scalar(0, 1, 0), 1);
+        //cv::line(cv_image, cv::Point2f(x0, y0), cv::Point2f(x1, y1), cv::Scalar(0, 1, 0), 1);
+
+        Eigen::Vector2f a, b;
+        std::tie(a, b) = epiline_limits(line, image.rows(), image.cols());
+        cv::line(cv_image, cv::Point2f(a.x(), a.y()), cv::Point2f(b.x(), b.y()), cv::Scalar(0, 1, 0), 1);
+
+        auto point = epilines[i].point;
+        cv::circle(cv_image, cv::Point2f(point.x(), point.y()), 2, cv::Scalar(0, 0, 0.8));
     }
 
     cv::imshow(title, cv_image);
+    //cv::imshow(title + "2", cv_image2);
 }
 
 inline void show_disparity(const std::string& title, const studd::two<Image>& disparity,
                            const Image& image, bool normalize = false)
 {
+    DRAW;
     cv::Mat cv_image;
     cv::eigen2cv(image, cv_image);
     cv::cvtColor(cv_image, cv_image, CV_GRAY2BGR);
 
-    for (size_t y = 0; y < image.rows(); y += 21)
-    {
-        for (size_t x = 0; x < image.cols(); x += 13)
-        {
-            auto x1 = x + disparity[0](y, x);
-            auto y1 = y + disparity[0](y, x);
-            cv::line(cv_image, cv::Point2f(x, y), cv::Point2f(x1, y1), cv::Scalar(0, 0, 0.8), 1);
-        }
-    }
-
     if (normalize)
         cv::normalize(cv_image, cv_image, 1, 0, cv::NORM_INF);
+
+    srand(0);
+    for (size_t i = 0; i < 400; i++)
+    {
+        auto x = rand() % image.cols();
+        auto y = rand() % image.rows();
+        auto dx = disparity[0](y, x);
+        auto dy = disparity[1](y, x);
+
+        if (!(dx != dx))
+        {
+            auto len = std::hypot(dx, dy);
+            auto x1 = x + dx;
+            auto y1 = y + dy;
+            //x1 = dx;
+            //y1 = dy;
+            cv::line(cv_image, cv::Point2f(x, y), cv::Point2f(x1, y1), cv::Scalar(0.1, 1, 0, 0.6), 1);
+        }
+    }
 
     cv::imshow(title, cv_image);
 }
