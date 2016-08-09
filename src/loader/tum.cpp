@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <iomanip>
+#include <fstream>
 
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
