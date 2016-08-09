@@ -169,13 +169,13 @@ namespace tum
     }
 
 
-    std::pair<double, Sophus::SE3f> loader::pose_at(const std::string& i_str)
+    std::pair<std::string, Sophus::SE3f> loader::pose_at(const std::string& i_str)
     {
         double i = std::stod(i_str);
         auto it_after = std::lower_bound(poses.begin(), poses.end(),
                                          i, &timestamp_search);
         auto it_before = it_after;
-        if (it_after->first == i)
+        if (it_after->first == i || it_before == poses.begin())
         {
             ++it_after;
         }
@@ -186,7 +186,7 @@ namespace tum
 
         double t = (i - it_before->first) / (it_after->first - it_before->first);
         auto interp = interpolate(it_before->second, it_after->second, t);
-        return {i, interp};
+        return {i_str, interp};
     }
 
     size_t loader::size() const
